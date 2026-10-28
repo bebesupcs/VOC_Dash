@@ -3249,6 +3249,10 @@ function analyzeClaimLeadtime(period, scope = "period", windowDays = 30) {
     };
   }).sort((a, b) => b.total - a.total);
 
+  const tagQuadrantMap = {};
+  tagBreakdown.forEach(t => { tagQuadrantMap[t.tag] = t.quadrant; });
+  targetClaims.forEach(c => { c.quadrant = tagQuadrantMap[c.first_tag || '기타'] || '3'; });
+
   return {
     claims: targetClaims,
     unmatchedRecalls,

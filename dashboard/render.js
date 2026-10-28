@@ -6471,11 +6471,14 @@ let channelSubTab = "overview";
 let claimLeadtimeScope = "period";
 let claimWindowDays = 30;
 let claimPage = 1;
-let claimPageSize = 10;
+const CLAIM_PAGE_SIZE = 15;
+let claimPageSize = 15;
 let claimCategoryFilterVal = "all";
 let claimCallFilterVal = "all";
 let claimLeadtimeFilterVal = "all";
+let claimQuadrantFilterVal = "all";
 let claimSearchTerm = "";
+let claimYScaleMode = "focus"; // "focus" (72h) or "full"
 let ctiDirFilterVal = "all";
 let ctiAgentFilterVal = "all";
 let ctiSearchTerm = "";
@@ -7396,6 +7399,118 @@ function escapeHtml(str) {
     .replace(/'/g, "&#039;");
 }
 
+// ==========================================
+// Crosshair & Quadrant Watermark Plugin for Chart.js
+// ==========================================
+const quadrantCrosshairPlugin = {
+  id: "quadrantCrosshair",
+  beforeDraw: (chart) => {
+    const { ctx, chartArea, scales } = chart;
+    if (!chartArea || !scales.x || !scales.y) return;
+    const { left, right, top, bottom } = chartArea;
+    const x20 = scales.x.getPixelForValue(20);
+    const y24 = scales.y.getPixelForValue(24);
+
+    ctx.save();
+
+    // 1. Faint quadrant background tints
+    if (x20 >= left && x20 <= right && y24 >= top && y24 <= bottom) {
+      // 1사분면 (우측 상단: 재통화↑ 시간↑)
+      ctx.fillStyle = "rgba(244, 63, 94, 0.05)";
+      ctx.fillRect(x20, top, right - x20, y24 - top);
+
+      // 2사분면 (좌측 상단: 재통화↓ 시간↑)
+      ctx.fillStyle = "rgba(245, 158, 11, 0.04)";
+      ctx.fillRect(left, top, x20 - left, y24 - top);
+
+      // 4사분면 (우측 하단: 재통화↑ 시간↓)
+      ctx.fillStyle = "rgba(2, 132, 199, 0.04)";
+      ctx.fillRect(x20, y24, right - x20, bottom - y24);
+
+      // 3사분면 (좌측 하단: 재통화↓ 시간↓)
+      ctx.fillStyle = "rgba(16, 185, 129, 0.04)";
+      ctx.fillRect(left, y24, x20 - left, bottom - y24);
+    }
+
+    // 2. Dashed Crosshair Lines
+    ctx.setLineDash([5, 4]);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "rgba(100, 116, 139, 0.35)";
+
+    // Vertical line at X = 20% (재통화 기준선)
+    if (x20 >= left && x20 <= right) {
+      ctx.beginPath();
+      ctx.moveTo(x20, top);
+      ctx.lineTo(x20, bottom);
+      ctx.stroke();
+
+      ctx.fillStyle = "#64748b";
+      ctx.font = "bold 9px sans-serif";
+      ctx.fillText("기준: 재통화율 20%", Math.min(x20 + 4, right - 85), bottom - 6);
+    }
+
+    // Horizontal line at Y = 24h (당일해결 기준선)
+    if (y24 >= top && y24 <= bottom) {
+      ctx.beginPath();
+      ctx.moveTo(left, y24);
+      ctx.lineTo(right, y24);
+      ctx.stroke();
+
+      ctx.fillStyle = "#64748b";
+      ctx.font = "bold 9px sans-serif";
+      ctx.fillText("기준: 당일 해결 (24h)", left + 6, Math.max(y24 - 4, top + 10));
+    }
+
+    // 3. Corner Quadrant Watermark Badges
+    ctx.setLineDash([]);
+    ctx.font = "bold 10px sans-serif";
+
+    // 1사분면 (우측 상단)
+    ctx.fillStyle = "rgba(190, 18, 60, 0.7)";
+    ctx.fillText("🚨 1사분면: 최우선 개선", right - 130, top + 16);
+
+    // 2사분면 (좌측 상단)
+    ctx.fillStyle = "rgba(180, 83, 9, 0.7)";
+    ctx.fillText("⏱️ 2사분면: 장기 검수형", left + 8, top + 16);
+
+    // 4사분면 (우측 하단)
+    ctx.fillStyle = "rgba(3, 105, 161, 0.7)";
+    ctx.fillText("🔁 4사분면: 단기 핑퐁", right - 120, y24 + 16);
+
+    // 3사분면 (좌측 하단)
+    ctx.fillStyle = "rgba(4, 120, 87, 0.7)";
+    ctx.fillText("✅ 3사분면: 빠른 종결", left + 8, y24 + 16);
+
+    ctx.restore();
+  }
+};
+
+function updateQuadrantPillsUI() {
+  const container = document.getElementById("claimQuadrantPills");
+  if (!container) return;
+  const buttons = container.querySelectorAll(".btn-quadrant-filter");
+  const activeStyles = {
+    all: "bg-zinc-800 text-white shadow-2xs font-bold",
+    "1": "bg-rose-600 text-white shadow-2xs font-bold ring-1 ring-rose-700",
+    "2": "bg-amber-600 text-white shadow-2xs font-bold ring-1 ring-amber-700",
+    "3": "bg-emerald-600 text-white shadow-2xs font-bold ring-1 ring-emerald-700",
+    "4": "bg-sky-600 text-white shadow-2xs font-bold ring-1 ring-sky-700"
+  };
+  const inactiveStyles = {
+    all: "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 font-medium",
+    "1": "bg-rose-50 text-rose-700 ring-1 ring-rose-600/20 hover:bg-rose-100 font-medium",
+    "2": "bg-amber-50 text-amber-700 ring-1 ring-amber-600/20 hover:bg-amber-100 font-medium",
+    "3": "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20 hover:bg-emerald-100 font-medium",
+    "4": "bg-sky-50 text-sky-700 ring-1 ring-sky-600/20 hover:bg-sky-100 font-medium"
+  };
+
+  buttons.forEach(btn => {
+    const q = btn.dataset.quadrant;
+    const base = "btn-quadrant-filter rounded px-2.5 py-1 transition cursor-pointer ";
+    btn.className = base + (q === claimQuadrantFilterVal ? activeStyles[q] : inactiveStyles[q]);
+  });
+}
+
 function renderClaimLeadtimeDetail() {
   const period = E.getPeriod();
   const res = E.analyzeClaimLeadtime(period, claimLeadtimeScope, claimWindowDays);
@@ -7433,6 +7548,7 @@ function renderClaimLeadtimeDetail() {
   renderClaimCategoryBreakdown(res.summary.categoryBreakdown);
 
   // 4. 도식화 다이어그램 2: 세부 태그별 4사분면 리스크 버블 차트 & 랭킹
+  updateQuadrantPillsUI();
   renderClaimTagMatrix(res.summary.tagBreakdown, res.claims);
 
   // 5. 통화 횟수별 분포 막대차트
@@ -7526,7 +7642,7 @@ function renderClaimLeadtimeDetail() {
             align: "top",
             offset: 2,
             font: { weight: "600", size: 11 },
-            color: (ctx) => ["#059669", "#0284c7", "#d97706", "#dc2626"][ctx.dataIndex],
+            color: (ctx) => ["#10b981", "#0284c7", "#d97706", "#ef4444"][ctx.dataIndex],
             formatter: (v, ctx) => `${Number(v).toLocaleString()}건 (${ltPct[ctx.dataIndex]}%)`
           }
         },
@@ -7545,66 +7661,93 @@ function renderClaimLeadtimeDetail() {
     });
   }
 
-  // 7. 상세 원장 테이블 렌더링
+  // 7. 하단 클레임 상세 원장 테이블
   renderClaimTable(res.claims);
 }
 
 function renderClaimProcessFlow(s) {
-  const elTot = document.getElementById("flowTotalClaims");
-  const elFcr = document.getElementById("flowFcrRate");
-  const elC1 = document.getElementById("flowCount1");
-  const elRep = document.getElementById("flowRepeatRate");
-  const elC23 = document.getElementById("flowCount23");
-  const elRisk = document.getElementById("flowRiskRate");
-  const elC4 = document.getElementById("flowCount4Plus");
+  const container = document.getElementById("claimProcessFlowCards");
+  if (!container || !s) return;
 
-  if (elTot) elTot.textContent = `${s.totalClaims.toLocaleString()}건`;
-  if (elFcr) elFcr.textContent = `FCR ${s.fcrRate}%`;
-  if (elC1) elC1.textContent = `${s.callDist.count1.toLocaleString()}건 (${s.fcrRate}%)`;
-  if (elRep) elRep.textContent = `재통화 ${s.repeatRate}%`;
-  if (elC23) elC23.textContent = `${s.callDist.count2_3.toLocaleString()}건`;
-  const riskRate = s.totalClaims > 0 ? ((s.callDist.count4_plus / s.totalClaims) * 100).toFixed(1) : "0.0";
-  if (elRisk) elRisk.textContent = `위험 ${riskRate}%`;
-  if (elC4) elC4.textContent = `${s.callDist.count4_plus.toLocaleString()}건 (${riskRate}%)`;
+  const tot = s.totalClaims || 1;
+  const singleCount = s.callDist.count1;
+  const singlePct = s.fcrRate;
+  const recallCount = s.callDist.count2_3 + s.callDist.count4_plus;
+  const recallPct = s.repeatRate;
+
+  const longCount = s.leadDist.days4_7 + s.leadDist.gt7Days;
+  const longPct = (((s.leadDist.days4_7 + s.leadDist.gt7Days) / tot) * 100).toFixed(1);
+
+  document.getElementById("step1Count").textContent = `${tot.toLocaleString()}건`;
+  document.getElementById("step1Sub").textContent = "인입 채널 100% 집계";
+
+  document.getElementById("step2Count").textContent = `${singleCount.toLocaleString()}건 (${singlePct}%)`;
+  document.getElementById("step2Sub").textContent = `재통화 분기 ${recallCount.toLocaleString()}건 (${recallPct}%)`;
+
+  document.getElementById("step3Count").textContent = `${longCount.toLocaleString()}건 (${longPct}%)`;
+  document.getElementById("step3Sub").textContent = "성분/공장 검수 이관 병목";
+
+  document.getElementById("step4Count").textContent = `평균 ${s.avgLeadTimeHours}h (${s.avgLeadTimeDays}일)`;
+  document.getElementById("step4Sub").textContent = `총 통화 ${s.avgCalls}회 · ${s.avgDurationMin}분`;
 }
 
 function renderClaimTagMatrix(tagBreakdown, claims) {
   const tbody = document.getElementById("claimTagTableBody");
   if (!tbody || !tagBreakdown) return;
 
-  tbody.innerHTML = tagBreakdown.map((t) => {
-    let qBadge = "";
-    if (t.quadrant === "1") qBadge = `<span class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold bg-rose-100 text-rose-800 ring-1 ring-rose-600/20">🚨 1사분면 최우선</span>`;
-    else if (t.quadrant === "2") qBadge = `<span class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold bg-amber-100 text-amber-800 ring-1 ring-amber-600/20">⏱️ 2사분면 장기</span>`;
-    else if (t.quadrant === "4") qBadge = `<span class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold bg-sky-100 text-sky-800 ring-1 ring-sky-600/20">🔁 4사분면 핑퐁</span>`;
-    else qBadge = `<span class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-emerald-100 text-emerald-800 ring-1 ring-emerald-600/20">✅ 3사분면 신속</span>`;
+  // 1. 사분면 필터 적용 (우측 테이블)
+  const filteredTags = claimQuadrantFilterVal === "all"
+    ? tagBreakdown
+    : tagBreakdown.filter(t => t.quadrant === claimQuadrantFilterVal);
 
-    return `
-      <tr class="hover:bg-zinc-50 transition">
-        <td class="py-2 px-2.5 font-medium text-zinc-800 max-w-[170px] truncate" title="${escapeHtml(t.tag)}">
-          ${escapeHtml(t.tag)}
-        </td>
-        <td class="py-2 px-2 text-right tnum font-semibold text-zinc-900">${t.total}건</td>
-        <td class="py-2 px-2 text-right tnum font-bold ${t.repeatRate >= 20 ? 'text-rose-600' : 'text-zinc-700'}">${t.repeatRate}%</td>
-        <td class="py-2 px-2 text-right tnum font-semibold ${t.avgLeadHours >= 24 ? 'text-amber-700' : 'text-teal-800'}">${t.avgLeadHours}h</td>
-        <td class="py-2 px-2 text-center">${qBadge}</td>
-        <td class="py-2 px-2 text-center">
-          <button type="button" class="btn-tag-filter rounded bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-teal-800 hover:bg-teal-600 hover:text-white transition cursor-pointer" data-tag="${escapeHtml(t.tag)}">
-            필터
-          </button>
-        </td>
-      </tr>
-    `;
-  }).join("");
+  if (filteredTags.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" class="py-8 text-center text-zinc-400 font-medium">선택하신 사분면에 해당하는 세부 태그가 없습니다.</td></tr>`;
+  } else {
+    tbody.innerHTML = filteredTags.map((t) => {
+      let qBadge = "";
+      if (t.quadrant === "1") qBadge = `<span class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold bg-rose-100 text-rose-800 ring-1 ring-rose-600/20">🚨 1사분면</span>`;
+      else if (t.quadrant === "2") qBadge = `<span class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold bg-amber-100 text-amber-800 ring-1 ring-amber-600/20">⏱️ 2사분면</span>`;
+      else if (t.quadrant === "4") qBadge = `<span class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold bg-sky-100 text-sky-800 ring-1 ring-sky-600/20">🔁 4사분면</span>`;
+      else qBadge = `<span class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-emerald-100 text-emerald-800 ring-1 ring-emerald-600/20">✅ 3사분면</span>`;
 
+      const isSelected = claimSearchTerm && claimSearchTerm === t.tag;
+      const leadDaysStr = (t.avgLeadHours / 24).toFixed(1);
+
+      return `
+        <tr class="hover:bg-zinc-50 transition cursor-pointer ${isSelected ? 'bg-teal-50/80 font-semibold' : ''}" data-tag="${escapeHtml(t.tag)}">
+          <td class="py-2 px-2.5 font-medium text-zinc-800 max-w-[170px] truncate" title="${escapeHtml(t.tag)}">
+            ${escapeHtml(t.tag)}
+          </td>
+          <td class="py-2 px-2 text-right tnum font-semibold text-zinc-900">${t.total}건</td>
+          <td class="py-2 px-2 text-right tnum font-bold ${t.repeatRate >= 20 ? 'text-rose-600' : 'text-zinc-700'}">${t.repeatRate}%</td>
+          <td class="py-2 px-2 text-right tnum font-semibold ${t.avgLeadHours >= 24 ? 'text-amber-700' : 'text-teal-800'}" title="${t.avgLeadHours}시간 (${leadDaysStr}일)">
+            ${t.avgLeadHours}h <span class="text-[10px] text-zinc-500 font-normal">(${leadDaysStr}일)</span>
+          </td>
+          <td class="py-2 px-2 text-center">${qBadge}</td>
+          <td class="py-2 px-2 text-center">
+            <button type="button" class="btn-tag-filter rounded ${isSelected ? 'bg-teal-600 text-white shadow-2xs' : 'bg-zinc-100 text-teal-800 hover:bg-teal-600 hover:text-white'} px-2 py-0.5 text-[10px] font-semibold transition cursor-pointer" data-tag="${escapeHtml(t.tag)}">
+              ${isSelected ? '선택됨 ✓' : '필터'}
+            </button>
+          </td>
+        </tr>
+      `;
+    }).join("");
+  }
+
+  // 태그 테이블의 행 및 필터 버튼 클릭 시 하단 원장 필터링
   tbody.querySelectorAll(".btn-tag-filter").forEach(b => {
     b.addEventListener("click", (e) => {
       e.stopPropagation();
       const targetTag = b.getAttribute("data-tag");
+      if (claimSearchTerm === targetTag) {
+        claimSearchTerm = "";
+      } else {
+        claimSearchTerm = targetTag;
+      }
       const searchInput = document.getElementById("claimSearchInput");
-      if (searchInput) searchInput.value = targetTag;
-      claimSearchTerm = targetTag;
+      if (searchInput) searchInput.value = claimSearchTerm;
       claimPage = 1;
+      renderClaimTagMatrix(tagBreakdown, claims);
       renderClaimTable(claims);
 
       const tblSection = document.getElementById("claimDetailTableBody");
@@ -7612,28 +7755,47 @@ function renderClaimTagMatrix(tagBreakdown, claims) {
     });
   });
 
+  // 2. 4사분면 버블 차트 렌더링
   destroyChart("claimTagMatrixChart");
   const chartEl = document.getElementById("claimTagMatrixChart");
   if (!chartEl || tagBreakdown.length === 0) return;
 
-  const bubbleData = tagBreakdown.map(t => ({
-    x: t.repeatRate,
-    y: t.avgLeadHours,
-    r: t.r,
-    tag: t.tag,
-    total: t.total,
-    quadrant: t.quadrant,
-    avgCalls: t.avgCalls
-  }));
+  const maxY = Math.max(...tagBreakdown.map(t => t.avgLeadHours), 0);
+  const isFocusScale = claimYScaleMode === "focus" && maxY > 72;
+  const effectiveYMax = isFocusScale ? 72 : Math.max(maxY * 1.15, 48);
+
+  const bubbleData = tagBreakdown.map(t => {
+    let plotY = t.avgLeadHours;
+    let isCapped = false;
+    if (isFocusScale && t.avgLeadHours > 72) {
+      plotY = 72;
+      isCapped = true;
+    }
+    return {
+      x: t.repeatRate,
+      y: plotY,
+      realY: t.avgLeadHours,
+      isCapped,
+      r: t.r,
+      tag: t.tag,
+      total: t.total,
+      quadrant: t.quadrant,
+      avgCalls: t.avgCalls
+    };
+  });
 
   const bgColors = bubbleData.map(d => {
-    if (d.quadrant === "1") return "rgba(225, 29, 72, 0.75)";
-    if (d.quadrant === "2") return "rgba(245, 158, 11, 0.75)";
-    if (d.quadrant === "4") return "rgba(2, 132, 199, 0.75)";
-    return "rgba(16, 185, 129, 0.75)";
+    const isDimmed = claimQuadrantFilterVal !== "all" && d.quadrant !== claimQuadrantFilterVal;
+    const alpha = isDimmed ? 0.12 : 0.8;
+    if (d.quadrant === "1") return `rgba(225, 29, 72, ${alpha})`;
+    if (d.quadrant === "2") return `rgba(245, 158, 11, ${alpha})`;
+    if (d.quadrant === "4") return `rgba(2, 132, 199, ${alpha})`;
+    return `rgba(16, 185, 129, ${alpha})`;
   });
 
   const borderColors = bubbleData.map(d => {
+    const isDimmed = claimQuadrantFilterVal !== "all" && d.quadrant !== claimQuadrantFilterVal;
+    if (isDimmed) return "rgba(148, 163, 184, 0.25)";
     if (d.quadrant === "1") return "#be123c";
     if (d.quadrant === "2") return "#d97706";
     if (d.quadrant === "4") return "#0369a1";
@@ -7648,27 +7810,61 @@ function renderClaimTagMatrix(tagBreakdown, claims) {
         data: bubbleData,
         backgroundColor: bgColors,
         borderColor: borderColors,
-        borderWidth: 1.5
+        borderWidth: (ctx) => {
+          const d = ctx.dataset.data[ctx.dataIndex];
+          return (claimSearchTerm && claimSearchTerm === d?.tag) ? 3 : 1.5;
+        }
       }]
     },
+    plugins: [quadrantCrosshairPlugin],
     options: {
-      layout: { padding: 12 },
+      layout: { padding: { top: 12, right: 16, bottom: 8, left: 8 } },
+      onClick: (evt, elements) => {
+        if (!elements.length) return;
+        const idx = elements[0].index;
+        const clickedData = bubbleData[idx];
+        if (clickedData && clickedData.tag) {
+          if (claimSearchTerm === clickedData.tag) {
+            claimSearchTerm = "";
+          } else {
+            claimSearchTerm = clickedData.tag;
+          }
+          const searchInput = document.getElementById("claimSearchInput");
+          if (searchInput) searchInput.value = claimSearchTerm;
+          claimPage = 1;
+          renderClaimTagMatrix(tagBreakdown, claims);
+          renderClaimTable(claims);
+
+          const tblSection = document.getElementById("claimDetailTableBody");
+          if (tblSection) tblSection.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      },
       plugins: {
         legend: { display: false },
         tooltip: {
           callbacks: {
             title: (items) => items.length ? items[0].raw.tag : "",
-            label: (ctx) => [
-              `총 건수: ${ctx.raw.total.toLocaleString()}건 (평균통화: ${ctx.raw.avgCalls}회)`,
-              `재통화율: ${ctx.raw.x}%`,
-              `평균 리드타임: ${ctx.raw.y}시간`
-            ]
+            label: (ctx) => {
+              const d = ctx.raw;
+              const h = Number(d.realY || d.y) || 0;
+              const days = (h / 24).toFixed(1);
+              const durDisplay = `${h}시간 (${days}일)${d.isCapped ? ' [상단 72h 초과 집중표시]' : ''}`;
+              const qNames = { "1": "🚨 1사분면 (최우선 개선)", "2": "⏱️ 2사분면 (장기 검수형)", "3": "✅ 3사분면 (빠른 종결)", "4": "🔁 4사분면 (단기 핑퐁)" };
+              return [
+                `총 건수: ${d.total.toLocaleString()}건 (평균 ${d.avgCalls}회 통화)`,
+                `재통화율: ${d.x}% (재통화 기준선: 20%)`,
+                `평균 해결시간: ${durDisplay}`,
+                `사분면: ${qNames[d.quadrant] || ""}`,
+                `💡 클릭 시 하단 원장 자동 필터링`
+              ];
+            }
           }
         },
         datalabels: {
           display: (ctx) => {
             const d = ctx.dataset.data[ctx.dataIndex];
-            return d.total >= 40 || d.quadrant === "1";
+            if (claimQuadrantFilterVal !== "all" && d.quadrant !== claimQuadrantFilterVal) return false;
+            return d.total >= 4 || d.quadrant === "1" || (claimSearchTerm && claimSearchTerm === d.tag);
           },
           align: "top",
           offset: 2,
@@ -7676,7 +7872,9 @@ function renderClaimTagMatrix(tagBreakdown, claims) {
           color: (ctx) => borderColors[ctx.dataIndex],
           formatter: (v) => {
             const parts = v.tag.split("/");
-            return parts[parts.length - 1];
+            const shortName = parts[parts.length - 1];
+            if (v.isCapped) return `▲${shortName} (${v.realY}h)`;
+            return shortName;
           }
         }
       },
@@ -7690,9 +7888,21 @@ function renderClaimTagMatrix(tagBreakdown, claims) {
         },
         y: {
           beginAtZero: true,
-          title: { display: true, text: "평균 리드타임 (시간) ➔", font: { size: 11, weight: "bold" }, color: "#64748b" },
+          max: effectiveYMax,
+          title: {
+            display: true,
+            text: isFocusScale ? "평균 해결 리드타임 (h, 72시간 집중뷰) ➔" : "평균 해결 리드타임 (시간) ➔",
+            font: { size: 11, weight: "bold" },
+            color: "#64748b"
+          },
           grid: { color: "rgba(0,0,0,.06)" },
-          ticks: { font: { size: 10 }, callback: (v) => `${v}h` }
+          ticks: {
+            font: { size: 10 },
+            callback: (v) => {
+              const days = (v / 24).toFixed(1);
+              return `${v}h (${days}일)`;
+            }
+          }
         }
       },
       responsive: true,
@@ -7702,654 +7912,320 @@ function renderClaimTagMatrix(tagBreakdown, claims) {
 }
 
 function renderClaimCategoryBreakdown(categories) {
-
-  const tbody = document.getElementById("claimCategoryTableBody");
-
+  const tbody = document.getElementById("claimCategoryBreakdownTable");
   if (!tbody || !categories) return;
 
-
-
-  tbody.innerHTML = categories.map((c, idx) => `
-
-    <tr class="${idx % 2 === 1 ? 'bg-zinc-50/50' : 'bg-white'} hover:bg-zinc-100/60 transition">
-
-      <td class="py-2 px-2.5 font-medium text-zinc-900">${escapeHtml(c.category)}</td>
-
-      <td class="py-2 px-2 text-right tnum font-semibold text-zinc-800">${Number(c.total).toLocaleString()}건</td>
-
-      <td class="py-2 px-2 text-right tnum text-zinc-600">${Number(c.repeats).toLocaleString()}건</td>
-
-      <td class="py-2 px-2 text-right tnum font-bold ${Number(c.repeatRate) >= 20 ? 'text-rose-600 bg-rose-50/40' : 'text-zinc-700'}">${c.repeatRate}%</td>
-
-      <td class="py-2 px-2 text-right tnum text-zinc-700">${c.avgCalls}회</td>
-
-      <td class="py-2 px-2 text-right tnum font-bold ${Number(c.avgLeadHours) >= 24 ? 'text-amber-700' : 'text-teal-800'}">${c.avgLeadHours}h (${c.avgLeadDays}일)</td>
-
-      <td class="py-2 px-2 text-right tnum text-zinc-600">${c.avgDurationMin}분</td>
-
-    </tr>
-
-  `).join("");
-
-
-
-  // Horizontal bar chart for category repeat rate
-
-  destroyChart("claimCategoryBarChart");
-
-  const catChartEl = document.getElementById("claimCategoryBarChart");
-
-  if (catChartEl && categories.length > 0) {
-
-    const labels = categories.map(c => c.category.split(" ")[0]);
-
-    const repeatRates = categories.map(c => Number(c.repeatRate));
-
-    const colors = categories.map(c => Number(c.repeatRate) >= 20 ? "#e11d48" : "#0f766e");
-
-
-
-    charts["claimCategoryBarChart"] = new Chart(catChartEl, {
-
-      type: "bar",
-
-      data: {
-
-        labels,
-
-        datasets: [{
-
-          label: "재통화율 (%)",
-
-          data: repeatRates,
-
-          backgroundColor: colors,
-
-          borderRadius: 4,
-
-          maxBarThickness: 24
-
-        }]
-
-      },
-
-      options: {
-
-        indexAxis: "y",
-
-        layout: { padding: { right: 35 } },
-
-        plugins: {
-
-          legend: { display: false },
-
-          tooltip: {
-
-            callbacks: {
-
-              label: (ctx) => `재통화율: ${ctx.raw}% (평균리드: ${categories[ctx.dataIndex].avgLeadHours}h)`
-
-            }
-
-          },
-
-          datalabels: {
-
-            display: true,
-
-            anchor: "end",
-
-            align: "right",
-
-            font: { weight: "bold", size: 10 },
-
-            color: (ctx) => colors[ctx.dataIndex],
-
-            formatter: (v) => `${v}%`
-
-          }
-
-        },
-
-        scales: {
-
-          x: {
-
-            beginAtZero: true,
-
-            max: Math.max(...repeatRates, 50) + 10,
-
-            grid: { color: "rgba(0,0,0,.05)" },
-
-            ticks: { font: { size: 10 }, callback: (v) => `${v}%` }
-
-          },
-
-          y: { grid: { display: false }, ticks: { font: { size: 11, weight: "500" } } }
-
-        },
-
-        responsive: true,
-
-        maintainAspectRatio: false
-
-      }
-
-    });
-
-  }
-
-}
-
-
-
-function renderClaimTable(claims) {
-
-  const tbody = document.getElementById("claimDetailTableBody");
-
-  const countBadge = document.getElementById("claimTableCountBadge");
-
-  const paginationEl = document.getElementById("claimPagination");
-
-  if (!tbody) return;
-
-
-
-  // 필터링 적용
-
-  let filtered = claims.filter(c => {
-
-    if (claimCallFilterVal === "1" && c.call_count !== 1) return false;
-
-    if (claimCallFilterVal === "2-3" && (c.call_count < 2 || c.call_count > 3)) return false;
-
-    if (claimCallFilterVal === "4+" && c.call_count < 4) return false;
-
-
-
-    if (claimCategoryFilterVal !== "all") {
-
-      if (claimCategoryFilterVal === "품질" && !c.category.includes("품질")) return false;
-
-      if (claimCategoryFilterVal === "배송" && !c.category.includes("배송")) return false;
-
-      if (claimCategoryFilterVal === "휴먼에러" && !c.category.includes("휴먼에러")) return false;
-
-      if (claimCategoryFilterVal === "시스템" && !c.category.includes("시스템")) return false;
-
-    }
-
-
-
-    if (claimSearchTerm) {
-
-      const q = claimSearchTerm.toLowerCase();
-
-      const match = (c.cust && c.cust.toLowerCase().includes(q)) ||
-
-                    (c.phone && c.phone.includes(q)) ||
-
-                    (c.first_tag && c.first_tag.toLowerCase().includes(q)) ||
-
-                    (c.agent && c.agent.toLowerCase().includes(q)) ||
-
-                    (c.issue && c.issue.toLowerCase().includes(q)) ||
-
-                    (c.act && c.act.toLowerCase().includes(q)) ||
-
-                    (c.claim_id && c.claim_id.toLowerCase().includes(q));
-
-      if (!match) return false;
-
-    }
-
-    return true;
-
-  });
-
-
-
-  if (countBadge) {
-
-    countBadge.textContent = `${filtered.length.toLocaleString()}건`;
-
-  }
-
-
-
-  // 페이지네이션
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / CLAIM_PAGE_SIZE));
-
-  if (claimPage > totalPages) claimPage = 1;
-
-  const startIdx = (claimPage - 1) * CLAIM_PAGE_SIZE;
-
-  const pageItems = filtered.slice(startIdx, startIdx + CLAIM_PAGE_SIZE);
-
-
-
-  if (pageItems.length === 0) {
-
-    tbody.innerHTML = `<tr><td colspan="10" class="py-8 text-center text-zinc-400">조회된 클레임 통화 내역이 없습니다.</td></tr>`;
-
-    if (paginationEl) paginationEl.innerHTML = "";
-
-    return;
-
-  }
-
-
-
-  tbody.innerHTML = pageItems.map((c, idx) => {
-
-    let callBadgeClass = "bg-teal-50 text-teal-700 ring-teal-600/20";
-
-    if (c.call_count >= 4) callBadgeClass = "bg-rose-50 text-rose-700 ring-rose-600/20 font-bold";
-
-    else if (c.call_count >= 2) callBadgeClass = "bg-amber-50 text-amber-700 ring-amber-600/20 font-semibold";
-
-
-
-    let leadBadge = "";
-
-    if (c.lead_time_hours <= 24.0) {
-
-      leadBadge = `<span class="inline-flex items-center rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-600/20">당일(${c.lead_time_hours}h)</span>`;
-
+  tbody.innerHTML = categories.map((c) => {
+    let riskBadge = "";
+    if (c.repeatRate >= 25 || c.avgLeadHours >= 24) {
+      riskBadge = '<span class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold bg-rose-100 text-rose-800 ring-1 ring-rose-600/20">🚨 고위험 병목</span>';
+    } else if (c.repeatRate >= 15 || c.avgLeadHours >= 12) {
+      riskBadge = '<span class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold bg-amber-100 text-amber-800 ring-1 ring-amber-600/20">⚠️ 주의 관찰</span>';
     } else {
-
-      leadBadge = `<span class="inline-flex items-center rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 ring-1 ring-inset ring-amber-600/20">${c.lead_time_days}일(${c.lead_time_hours}h)</span>`;
-
+      riskBadge = '<span class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-emerald-100 text-emerald-800 ring-1 ring-emerald-600/20">✅ 양호 (신속)</span>';
     }
-
-
-
-    const issueSnippet = (c.issue || "-").replace(/\n/g, " ");
-
-    const actSnippet = (c.act || "-").replace(/\n/g, " ");
-
-
-
-    // Build timeline HTML for this claim's calls
-
-    const timelineHtml = c.calls.map((call, cIdx) => {
-
-      const durSec = call.talk || 0;
-
-      const durStr = `${Math.floor(durSec / 60)}분 ${durSec % 60}초`;
-
-      const isOut = call.dir === "outbound";
-
-      return `
-
-        <div class="flex items-start gap-2.5 text-xs py-1.5 border-l-2 ${cIdx === 0 ? 'border-teal-600' : 'border-amber-500'} pl-3 ml-2">
-
-          <div class="font-bold min-w-[55px] ${cIdx === 0 ? 'text-teal-700' : 'text-amber-700'}">${cIdx + 1}차 ${isOut ? '발신(OUT)' : '수신(IN)'}</div>
-
-          <div class="text-zinc-500 font-mono min-w-[130px]">${call.time || "-"}</div>
-
-          <div class="font-medium text-zinc-700 min-w-[70px]">${escapeHtml(call.agent || "-")}</div>
-
-          <div class="text-zinc-600 min-w-[65px]">${durStr}</div>
-
-          <div class="text-zinc-600 flex-1">
-
-            <span class="text-zinc-400 font-medium">문의:</span> ${escapeHtml((call.issue || "-").replace(/\n/g, " "))}
-
-            <span class="text-teal-600 font-medium ml-2">조치:</span> ${escapeHtml((call.act || "-").replace(/\n/g, " "))}
-
-          </div>
-
-        </div>
-
-      `;
-
-    }).join("");
-
-
 
     return `
-
-      <tr class="hover:bg-zinc-50/80 transition cursor-pointer" onclick="toggleClaimRow('${c.claim_id}')">
-
-        <td class="py-2.5 px-3 font-mono text-[11px] text-zinc-500">
-
-          <div class="flex items-center gap-1">
-
-            <span id="chevron-${c.claim_id}" class="text-[10px] text-zinc-400 transition-transform">▶</span>
-
-            <span>${c.claim_id}</span>
-
-          </div>
-
-        </td>
-
-        <td class="py-2.5 px-3 font-medium text-zinc-900">
-
-          <div>${escapeHtml(c.cust)}</div>
-
-          <div class="text-[10px] text-zinc-400 font-mono">${escapeHtml(c.phone)}</div>
-
-        </td>
-
-        <td class="py-2.5 px-3 text-[11px] text-zinc-600 whitespace-nowrap">${c.first_time || "-"}</td>
-
-        <td class="py-2.5 px-3 text-[11px] text-zinc-600 whitespace-nowrap">${c.last_time || "-"}</td>
-
-        <td class="py-2.5 px-3 whitespace-nowrap">${leadBadge}</td>
-
-        <td class="py-2.5 px-3 text-center">
-
-          <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] ring-1 ring-inset ${callBadgeClass}">
-
-            ${c.call_count}회
-
-          </span>
-
-        </td>
-
-        <td class="py-2.5 px-3 text-right font-medium text-zinc-800 tnum whitespace-nowrap">
-
-          ${c.total_call_duration_str}
-
-        </td>
-
-        <td class="py-2.5 px-3 text-[11px] text-zinc-700 max-w-[150px] truncate" title="${escapeHtml(c.first_tag)}">
-
-          ${escapeHtml(c.first_tag || "-")}
-
-        </td>
-
-        <td class="py-2.5 px-3 text-[11px] text-zinc-600 whitespace-nowrap">${escapeHtml(c.agent || "-")}</td>
-
-        <td class="py-2.5 px-3 text-[11px] text-zinc-500 max-w-[260px]">
-
-          <div class="truncate text-zinc-800" title="${escapeHtml(issueSnippet)}"><span class="font-medium text-zinc-400">Q:</span> ${escapeHtml(issueSnippet)}</div>
-
-          <div class="truncate text-zinc-500 text-[10px]" title="${escapeHtml(actSnippet)}"><span class="font-medium text-teal-600">A:</span> ${escapeHtml(actSnippet)}</div>
-
-        </td>
-
+      <tr class="hover:bg-zinc-50 transition">
+        <td class="py-2.5 px-3 font-semibold text-zinc-900">${escapeHtml(c.category)}</td>
+        <td class="py-2.5 px-3 text-right tnum font-bold text-zinc-900">${c.total.toLocaleString()}건</td>
+        <td class="py-2.5 px-3 text-right tnum font-semibold text-rose-700">${c.repeatRate}%</td>
+        <td class="py-2.5 px-3 text-right tnum font-semibold text-teal-800">${c.avgLeadHours}시간 (${c.avgLeadDays}일)</td>
+        <td class="py-2.5 px-3 text-right tnum text-zinc-700">${c.avgCalls}회</td>
+        <td class="py-2.5 px-3 text-right tnum text-zinc-600">${c.avgDurationMin}분</td>
+        <td class="py-2.5 px-3 text-center">${riskBadge}</td>
       </tr>
-
-      <tr id="timeline-${c.claim_id}" class="hidden bg-zinc-50/70">
-
-        <td colspan="10" class="p-3 border-y border-teal-200/50">
-
-          <div class="rounded-lg bg-white p-3 ring-1 ring-black/5">
-
-            <div class="text-xs font-bold text-zinc-800 mb-2 flex items-center justify-between">
-
-              <span>📞 통화 여정 타임라인 (총 ${c.call_count}회 통화 · 소요시간 ${c.lead_time_hours}시간)</span>
-
-              <span class="text-[11px] text-zinc-400 font-normal">고객: ${escapeHtml(c.cust)} (${escapeHtml(c.phone)})</span>
-
-            </div>
-
-            <div class="space-y-1">
-
-              ${timelineHtml}
-
-            </div>
-
-          </div>
-
-        </td>
-
-      </tr>
-
     `;
-
   }).join("");
-
-
-
-  // Pagination buttons
-
-  if (paginationEl) {
-
-    paginationEl.innerHTML = `
-
-      <div>
-
-        전체 <span class="font-semibold text-zinc-800">${filtered.length.toLocaleString()}</span>건 중 
-
-        <span class="font-semibold text-zinc-800">${startIdx + 1}</span>~<span class="font-semibold text-zinc-800">${Math.min(filtered.length, startIdx + CLAIM_PAGE_SIZE)}</span>건 표시 (페이지 ${claimPage}/${totalPages})
-
-      </div>
-
-      <div class="flex items-center gap-1.5">
-
-        <button id="btnClaimPrevPage" type="button" class="rounded border border-black/10 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 cursor-pointer" ${claimPage <= 1 ? "disabled" : ""}>이전</button>
-
-        <button id="btnClaimNextPage" type="button" class="rounded border border-black/10 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 cursor-pointer" ${claimPage >= totalPages ? "disabled" : ""}>다음</button>
-
-      </div>
-
-    `;
-
-
-
-    const btnPrev = document.getElementById("btnClaimPrevPage");
-
-    if (btnPrev) {
-
-      btnPrev.addEventListener("click", () => {
-
-        if (claimPage > 1) {
-
-          claimPage--;
-
-          renderClaimTable(claims);
-
-        }
-
-      });
-
-    }
-
-
-
-    const btnNext = document.getElementById("btnClaimNextPage");
-
-    if (btnNext) {
-
-      btnNext.addEventListener("click", () => {
-
-        if (claimPage < totalPages) {
-
-          claimPage++;
-
-          renderClaimTable(claims);
-
-        }
-
-      });
-
-    }
-
-  }
-
 }
 
+function renderClaimTable(claims) {
+  const tbody = document.getElementById("claimDetailTableBody");
+  const countBadge = document.getElementById("claimTableCountBadge");
+  const paginationEl = document.getElementById("claimPagination");
+  const activeBadge = document.getElementById("claimTableActiveFilterBadge");
+  const resetBtn = document.getElementById("btnResetClaimTableFilters");
+  if (!tbody) return;
 
+  // Active filter badge text
+  let activeFilters = [];
+  if (claimQuadrantFilterVal !== "all") {
+    const qNames = { "1": "🚨 1사분면(최우선)", "2": "⏱️ 2사분면(장기)", "3": "✅ 3사분면(신속)", "4": "🔁 4사분면(핑퐁)" };
+    activeFilters.push(qNames[claimQuadrantFilterVal] || claimQuadrantFilterVal);
+  }
+  if (claimCategoryFilterVal !== "all") activeFilters.push(`분류: ${claimCategoryFilterVal}`);
+  if (claimCallFilterVal !== "all") activeFilters.push(`통화: ${claimCallFilterVal}`);
+  if (claimSearchTerm) activeFilters.push(`검색: "${claimSearchTerm}"`);
 
-function toggleClaimRow(claimId) {
+  if (activeBadge) {
+    activeBadge.textContent = activeFilters.length ? activeFilters.join(" · ") : "전체 건";
+    activeBadge.className = activeFilters.length
+      ? "rounded bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-800 ring-1 ring-amber-600/30"
+      : "rounded bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 ring-1 ring-black/5";
+  }
+  if (resetBtn) {
+    resetBtn.classList.toggle("hidden", activeFilters.length === 0);
+  }
 
-  const row = document.getElementById(`timeline-${claimId}`);
+  // 필터링 적용
+  let filtered = claims.filter(c => {
+    // 1. 사분면 필터
+    if (claimQuadrantFilterVal !== "all" && c.quadrant !== claimQuadrantFilterVal) return false;
 
-  const chevron = document.getElementById(`chevron-${claimId}`);
+    // 2. 통화 횟수 필터
+    if (claimCallFilterVal === "1" && c.call_count !== 1) return false;
+    if (claimCallFilterVal === "2-3" && (c.call_count < 2 || c.call_count > 3)) return false;
+    if (claimCallFilterVal === "4+" && c.call_count < 4) return false;
 
-  if (row) {
-
-    row.classList.toggle("hidden");
-
-    if (chevron) {
-
-      chevron.textContent = row.classList.contains("hidden") ? "▶" : "▼";
-
+    // 3. 카테고리 필터
+    if (claimCategoryFilterVal !== "all") {
+      if (claimCategoryFilterVal === "품질" && !c.category.includes("품질")) return false;
+      if (claimCategoryFilterVal === "배송" && !c.category.includes("배송")) return false;
+      if (claimCategoryFilterVal === "휴먼에러" && !c.category.includes("휴먼에러")) return false;
+      if (claimCategoryFilterVal === "시스템" && !c.category.includes("시스템")) return false;
     }
 
-  }
-
-}
-
-
-
-async function exportClaimAnalysisToExcel() {
-
-  const period = E.getPeriod();
-
-  const res = E.analyzeClaimLeadtime(period, claimLeadtimeScope, claimWindowDays);
-
-  const claims = res.claims;
-
-
-
-  if (!claims || claims.length === 0) {
-
-    alert("다운로드할 클레임 데이터가 없습니다.");
-
-    return;
-
-  }
-
-
-
-  if (typeof ExcelJS === "undefined") {
-
-    alert("ExcelJS 라이브러리를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.");
-
-    return;
-
-  }
-
-
-
-  const wb = new ExcelJS.Workbook();
-
-  wb.creator = "CX Dashboard";
-
-  wb.created = new Date();
-
-
-
-  // Sheet 1: 클레임 리드타임 상세 원장
-
-  const ws = wb.addWorksheet("클레임_리드타임_원장");
-
-  ws.columns = [
-
-    { header: "Claim ID", key: "claim_id", width: 22 },
-
-    { header: "클레임 유형", key: "category", width: 26 },
-
-    { header: "고객명", key: "cust", width: 14 },
-
-    { header: "연락처", key: "phone", width: 16 },
-
-    { header: "최초 클레임 일시", key: "first_time", width: 20 },
-
-    { header: "최종 통화 일시", key: "last_time", width: 20 },
-
-    { header: "소요 리드타임(시간)", key: "lead_time_hours", width: 18 },
-
-    { header: "소요 리드타임(일)", key: "lead_time_days", width: 16 },
-
-    { header: "총 통화횟수(회)", key: "call_count", width: 14 },
-
-    { header: "총 통화시간(분)", key: "total_call_duration", width: 16 },
-
-    { header: "세부 태그", key: "first_tag", width: 28 },
-
-    { header: "담당 상담사", key: "agent", width: 14 },
-
-    { header: "고객 문의내용", key: "issue", width: 36 },
-
-    { header: "상담원 조치내용", key: "act", width: 36 }
-
-  ];
-
-
-
-  // Header style
-
-  ws.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
-
-  ws.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F766E" } };
-
-  ws.getRow(1).alignment = { vertical: "middle", horizontal: "center" };
-
-
-
-  claims.forEach((c) => {
-
-    ws.addRow({
-
-      claim_id: c.claim_id,
-
-      category: c.category,
-
-      cust: c.cust,
-
-      phone: c.phone,
-
-      first_time: c.first_time,
-
-      last_time: c.last_time,
-
-      lead_time_hours: c.lead_time_hours,
-
-      lead_time_days: c.lead_time_days,
-
-      call_count: c.call_count,
-
-      total_call_duration: c.total_call_duration,
-
-      first_tag: c.first_tag,
-
-      agent: c.agent,
-
-      issue: c.issue,
-
-      act: c.act
-
-    });
-
+    // 4. 검색어 필터
+    if (claimSearchTerm) {
+      const q = claimSearchTerm.toLowerCase();
+      const match = (c.cust && c.cust.toLowerCase().includes(q)) ||
+                    (c.phone && c.phone.includes(q)) ||
+                    (c.first_tag && c.first_tag.toLowerCase().includes(q)) ||
+                    (c.agent && c.agent.toLowerCase().includes(q)) ||
+                    (c.issue && c.issue.toLowerCase().includes(q)) ||
+                    (c.act && c.act.toLowerCase().includes(q)) ||
+                    (c.claim_id && c.claim_id.toLowerCase().includes(q));
+      if (!match) return false;
+    }
+    return true;
   });
 
+  if (countBadge) {
+    countBadge.textContent = `${filtered.length.toLocaleString()}건`;
+  }
 
+  // 페이지네이션
+  const totalPages = Math.max(1, Math.ceil(filtered.length / CLAIM_PAGE_SIZE));
+  if (claimPage > totalPages) claimPage = 1;
+  const startIdx = (claimPage - 1) * CLAIM_PAGE_SIZE;
+  const pageItems = filtered.slice(startIdx, startIdx + CLAIM_PAGE_SIZE);
 
-  const pLabel = period && period.key ? period.key : "ALL";
+  if (pageItems.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="10" class="py-12 text-center text-zinc-400 font-medium">선택하신 조건에 해당하는 클레임 내역이 없습니다. (상단의 '필터 초기화 ↺' 버튼을 누르시면 전체 건을 보실 수 있습니다)</td></tr>`;
+    if (paginationEl) paginationEl.innerHTML = "";
+    return;
+  }
 
-  const fileName = `클레임_처리_리드타임_통화분석_${pLabel}.xlsx`;
+  tbody.innerHTML = pageItems.map((c, idx) => {
+    let callBadgeClass = "bg-teal-50 text-teal-700 ring-teal-600/20";
+    if (c.call_count >= 4) callBadgeClass = "bg-rose-50 text-rose-700 ring-rose-600/20 font-bold";
+    else if (c.call_count >= 2) callBadgeClass = "bg-amber-50 text-amber-700 ring-amber-600/20 font-semibold";
 
+    let leadBadge = "";
+    if (c.lead_time_hours <= 24.0) {
+      leadBadge = `<span class="inline-flex items-center rounded bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 ring-1 ring-inset ring-emerald-600/20" title="${c.lead_time_hours}시간 (${c.lead_time_days}일)">${c.lead_time_hours}h <span class="text-[10px] text-zinc-500 font-normal ml-0.5">(${c.lead_time_days}일)</span></span>`;
+    } else {
+      leadBadge = `<span class="inline-flex items-center rounded bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800 ring-1 ring-inset ring-amber-600/20" title="${c.lead_time_hours}시간 (${c.lead_time_days}일)">${c.lead_time_hours}h <span class="text-[10px] text-zinc-500 font-normal ml-0.5">(${c.lead_time_days}일)</span></span>`;
+    }
 
+    const issueSnippet = (c.issue || "-").replace(/\n/g, " ");
+    const actSnippet = (c.act || "-").replace(/\n/g, " ");
 
-  const buf = await wb.xlsx.writeBuffer();
+    const timelineHtml = c.calls.map((call, cIdx) => {
+      const durSec = call.talk || 0;
+      const durStr = `${Math.floor(durSec / 60)}분 ${durSec % 60}초`;
+      const isOut = call.dir === "outbound";
+      return `
+        <div class="flex items-start gap-2.5 text-xs py-1.5 border-l-2 ${cIdx === 0 ? 'border-teal-600' : 'border-amber-500'} pl-3 ml-2">
+          <div class="font-bold min-w-[55px] ${cIdx === 0 ? 'text-teal-700' : 'text-amber-700'}">${cIdx + 1}차 ${isOut ? '발신(OUT)' : '수신(IN)'}</div>
+          <div class="text-zinc-500 font-mono min-w-[130px]">${call.time || "-"}</div>
+          <div class="font-medium text-zinc-700 min-w-[70px]">${escapeHtml(call.agent || "-")}</div>
+          <div class="text-zinc-600 min-w-[65px]">${durStr}</div>
+          <div class="text-zinc-600 flex-1">
+            <span class="text-zinc-400 font-medium">문의:</span> ${escapeHtml((call.issue || "-").replace(/\n/g, " "))}
+            <span class="text-teal-600 font-medium ml-2">조치:</span> ${escapeHtml((call.act || "-").replace(/\n/g, " "))}
+          </div>
+        </div>
+      `;
+    }).join("");
 
-  const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    return `
+      <tr class="hover:bg-zinc-50/80 transition cursor-pointer" onclick="toggleClaimRow('${c.claim_id}')">
+        <td class="py-2.5 px-3 font-mono text-[11px] text-zinc-500">
+          <div class="flex items-center gap-1">
+            <span id="chevron-${c.claim_id}" class="text-[10px] text-zinc-400 transition-transform">▶</span>
+            <span>${c.claim_id}</span>
+          </div>
+        </td>
+        <td class="py-2.5 px-3 font-medium text-zinc-900">
+          <div>${escapeHtml(c.cust)}</div>
+          <div class="text-[10px] text-zinc-400 font-mono">${escapeHtml(c.phone)}</div>
+        </td>
+        <td class="py-2.5 px-3 text-[11px] text-zinc-600 whitespace-nowrap">${c.first_time || "-"}</td>
+        <td class="py-2.5 px-3 text-[11px] text-zinc-600 whitespace-nowrap">${c.last_time || "-"}</td>
+        <td class="py-2.5 px-3 whitespace-nowrap">${leadBadge}</td>
+        <td class="py-2.5 px-3 text-center">
+          <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] ring-1 ring-inset ${callBadgeClass}">
+            ${c.call_count}회
+          </span>
+        </td>
+        <td class="py-2.5 px-3 text-right font-medium text-zinc-800 tnum whitespace-nowrap">
+          ${c.total_call_duration_str}
+        </td>
+        <td class="py-2.5 px-3 text-[11px] text-zinc-700 max-w-[150px] truncate" title="${escapeHtml(c.first_tag)}">
+          ${escapeHtml(c.first_tag || "-")}
+        </td>
+        <td class="py-2.5 px-3 text-[11px] text-zinc-600 whitespace-nowrap">${escapeHtml(c.agent || "-")}</td>
+        <td class="py-2.5 px-3 text-[11px] text-zinc-500 max-w-[260px]">
+          <div class="truncate text-zinc-800" title="${escapeHtml(issueSnippet)}"><span class="font-medium text-zinc-400">Q:</span> ${escapeHtml(issueSnippet)}</div>
+          <div class="truncate text-zinc-500 text-[10px]" title="${escapeHtml(actSnippet)}"><span class="font-medium text-teal-600">A:</span> ${escapeHtml(actSnippet)}</div>
+        </td>
+      </tr>
+      <tr id="timeline-${c.claim_id}" class="hidden bg-zinc-50/70">
+        <td colspan="10" class="p-3 border-y border-teal-200/50">
+          <div class="rounded-lg bg-white p-3 ring-1 ring-black/5">
+            <div class="text-xs font-bold text-zinc-800 mb-2 flex items-center justify-between">
+              <span>📞 통화 여정 타임라인 (총 ${c.call_count}회 통화 · 소요시간 ${c.lead_time_hours}시간)</span>
+              <span class="text-[11px] text-zinc-400 font-normal">고객: ${escapeHtml(c.cust)} (${escapeHtml(c.phone)})</span>
+            </div>
+            <div class="space-y-1">
+              ${timelineHtml}
+            </div>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join("");
 
-  const url = URL.createObjectURL(blob);
+  // Pagination buttons
+  if (paginationEl) {
+    paginationEl.innerHTML = `
+      <div>
+        전체 <span class="font-semibold text-zinc-800">${filtered.length.toLocaleString()}</span>건 중 
+        <span class="font-semibold text-zinc-800">${startIdx + 1}</span>~<span class="font-semibold text-zinc-800">${Math.min(filtered.length, startIdx + CLAIM_PAGE_SIZE)}</span>건 표시 (페이지 ${claimPage}/${totalPages})
+      </div>
+      <div class="flex items-center gap-1.5">
+        <button id="btnClaimPrevPage" type="button" class="rounded border border-black/10 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 cursor-pointer" ${claimPage <= 1 ? "disabled" : ""}>이전</button>
+        <button id="btnClaimNextPage" type="button" class="rounded border border-black/10 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 cursor-pointer" ${claimPage >= totalPages ? "disabled" : ""}>다음</button>
+      </div>
+    `;
 
-  const a = document.createElement("a");
+    const btnPrev = document.getElementById("btnClaimPrevPage");
+    if (btnPrev) {
+      btnPrev.addEventListener("click", () => {
+        if (claimPage > 1) {
+          claimPage--;
+          renderClaimTable(claims);
+        }
+      });
+    }
 
-  a.href = url;
-
-  a.download = fileName;
-
-  document.body.appendChild(a);
-
-  a.click();
-
-  document.body.removeChild(a);
-
-  URL.revokeObjectURL(url);
-
+    const btnNext = document.getElementById("btnClaimNextPage");
+    if (btnNext) {
+      btnNext.addEventListener("click", () => {
+        if (claimPage < totalPages) {
+          claimPage++;
+          renderClaimTable(claims);
+        }
+      });
+    }
+  }
 }
 
+function toggleClaimRow(claimId) {
+  const row = document.getElementById(`timeline-${claimId}`);
+  const chevron = document.getElementById(`chevron-${claimId}`);
+  if (!row) return;
 
+  if (row.classList.contains("hidden")) {
+    row.classList.remove("hidden");
+    if (chevron) chevron.style.transform = "rotate(90deg)";
+  } else {
+    row.classList.add("hidden");
+    if (chevron) chevron.style.transform = "rotate(0deg)";
+  }
+}
+
+async function exportClaimAnalysisToExcel() {
+  const period = E.getPeriod();
+  const res = E.analyzeClaimLeadtime(period, claimLeadtimeScope, claimWindowDays);
+  const claims = res.claims;
+
+  if (!claims || claims.length === 0) {
+    alert("다운로드할 클레임 데이터가 없습니다.");
+    return;
+  }
+
+  if (typeof ExcelJS === "undefined") {
+    alert("ExcelJS 라이브러리를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.");
+    return;
+  }
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "CX Dashboard";
+  wb.created = new Date();
+
+  // Sheet 1: 클레임 리드타임 상세 원장
+  const ws = wb.addWorksheet("클레임_리드타임_원장");
+  ws.columns = [
+    { header: "Claim ID", key: "claim_id", width: 22 },
+    { header: "사분면", key: "quadrant_name", width: 18 },
+    { header: "클레임 유형", key: "category", width: 26 },
+    { header: "고객명", key: "cust", width: 14 },
+    { header: "연락처", key: "phone", width: 16 },
+    { header: "최초 클레임 일시", key: "first_time", width: 20 },
+    { header: "최종 통화 일시", key: "last_time", width: 20 },
+    { header: "소요 리드타임(시간)", key: "lead_time_hours", width: 18 },
+    { header: "소요 리드타임(일)", key: "lead_time_days", width: 16 },
+    { header: "총 통화횟수(회)", key: "call_count", width: 14 },
+    { header: "총 통화시간(분)", key: "total_call_duration", width: 16 },
+    { header: "세부 태그", key: "first_tag", width: 28 },
+    { header: "담당 상담사", key: "agent", width: 14 },
+    { header: "고객 문의내용", key: "issue", width: 36 },
+    { header: "상담원 조치내용", key: "act", width: 36 }
+  ];
+
+  // Header style
+  ws.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+  ws.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F766E" } };
+  ws.getRow(1).alignment = { vertical: "middle", horizontal: "center" };
+
+  const qNames = { "1": "1사분면(최우선개선)", "2": "2사분면(장기검수)", "3": "3사분면(빠른해결)", "4": "4사분면(단기핑퐁)" };
+
+  claims.forEach((c) => {
+    ws.addRow({
+      claim_id: c.claim_id,
+      quadrant_name: qNames[c.quadrant] || "3사분면(빠른해결)",
+      category: c.category,
+      cust: c.cust,
+      phone: c.phone,
+      first_time: c.first_time,
+      last_time: c.last_time,
+      lead_time_hours: c.lead_time_hours,
+      lead_time_days: c.lead_time_days,
+      call_count: c.call_count,
+      total_call_duration: c.total_call_duration,
+      first_tag: c.first_tag,
+      agent: c.agent,
+      issue: c.issue,
+      act: c.act
+    });
+  });
+
+  const pLabel = period && period.key ? period.key : "ALL";
+  const fileName = `클레임_처리_리드타임_통화분석_${pLabel}.xlsx`;
+
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 function renderCompensation() {
   const period = E.getPeriod();
   if (!period) return;
@@ -10067,6 +9943,68 @@ function init() {
   const btnExportClaimAnalysis = document.getElementById("btnExportClaimAnalysis");
   if (btnExportClaimAnalysis) {
     btnExportClaimAnalysis.addEventListener("click", exportClaimAnalysisToExcel);
+  }
+
+  // 4사분면 필터 버튼 이벤트
+  const quadButtons = document.querySelectorAll(".btn-quadrant-filter");
+  quadButtons.forEach(btn => {
+    btn.addEventListener("click", () => {
+      claimQuadrantFilterVal = btn.dataset.quadrant;
+      claimPage = 1;
+      updateQuadrantPillsUI();
+      const period = E.getPeriod();
+      const res = E.analyzeClaimLeadtime(period, claimLeadtimeScope, claimWindowDays);
+      renderClaimTagMatrix(res.summary.tagBreakdown, res.claims);
+      renderClaimTable(res.claims);
+    });
+  });
+
+  // Y축 스케일 토글 버튼
+  const btnYFocus = document.getElementById("btnClaimYScaleFocus");
+  const btnYFull = document.getElementById("btnClaimYScaleFull");
+  if (btnYFocus && btnYFull) {
+    btnYFocus.addEventListener("click", () => {
+      claimYScaleMode = "focus";
+      btnYFocus.className = "rounded px-2 py-0.5 text-[10px] font-semibold bg-teal-600 text-white shadow-2xs transition cursor-pointer";
+      btnYFull.className = "rounded px-2 py-0.5 text-[10px] font-medium bg-zinc-100 text-zinc-600 hover:bg-zinc-200 transition cursor-pointer";
+      const period = E.getPeriod();
+      const res = E.analyzeClaimLeadtime(period, claimLeadtimeScope, claimWindowDays);
+      renderClaimTagMatrix(res.summary.tagBreakdown, res.claims);
+    });
+    btnYFull.addEventListener("click", () => {
+      claimYScaleMode = "full";
+      btnYFull.className = "rounded px-2 py-0.5 text-[10px] font-semibold bg-teal-600 text-white shadow-2xs transition cursor-pointer";
+      btnYFocus.className = "rounded px-2 py-0.5 text-[10px] font-medium bg-zinc-100 text-zinc-600 hover:bg-zinc-200 transition cursor-pointer";
+      const period = E.getPeriod();
+      const res = E.analyzeClaimLeadtime(period, claimLeadtimeScope, claimWindowDays);
+      renderClaimTagMatrix(res.summary.tagBreakdown, res.claims);
+    });
+  }
+
+  // 필터 초기화 버튼
+  const btnResetFilters = document.getElementById("btnResetClaimTableFilters");
+  if (btnResetFilters) {
+    btnResetFilters.addEventListener("click", () => {
+      claimQuadrantFilterVal = "all";
+      claimCategoryFilterVal = "all";
+      claimCallFilterVal = "all";
+      claimSearchTerm = "";
+      claimPage = 1;
+
+      updateQuadrantPillsUI();
+
+      const searchInput = document.getElementById("claimSearchInput");
+      if (searchInput) searchInput.value = "";
+      const catFilter = document.getElementById("claimCategoryFilter");
+      if (catFilter) catFilter.value = "all";
+      const callFilter = document.getElementById("claimCallCountFilter");
+      if (callFilter) callFilter.value = "all";
+
+      const period = E.getPeriod();
+      const res = E.analyzeClaimLeadtime(period, claimLeadtimeScope, claimWindowDays);
+      renderClaimTagMatrix(res.summary.tagBreakdown, res.claims);
+      renderClaimTable(res.claims);
+    });
   }
 
   const alfStatusFilter = document.getElementById("alfStatusFilter");
