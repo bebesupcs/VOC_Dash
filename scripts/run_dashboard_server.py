@@ -36,8 +36,12 @@ def get_local_ip():
 
 PORT = 8080
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DIRECTORY = str(PROJECT_ROOT / "dashboard")
-CLOUDFLARED_BIN = PROJECT_ROOT / "tools" / "cloudflared.exe"
+if os.name == "nt":
+    CLOUDFLARED_BIN = PROJECT_ROOT / "tools" / "cloudflared.exe"
+else:
+    CLOUDFLARED_BIN = Path("/usr/local/bin/cloudflared")
+    if not CLOUDFLARED_BIN.exists():
+        CLOUDFLARED_BIN = Path("cloudflared")
 
 sync_lock = threading.Lock()
 sync_status = {

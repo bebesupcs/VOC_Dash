@@ -24,7 +24,8 @@ if sys.stdout.encoding != 'utf-8':
     except Exception:
         pass
 
-DEFAULT_DB_PATH = r"X:\11. VOC, CCM 자료 등\1. VOC 불만접수현황\db\channeltalk_voc.db"
+NAS_DB_PATH = "/volume1/data/11. VOC, CCM 자료 등/1. VOC 불만접수현황/db/channeltalk_voc.db"
+DEFAULT_DB_PATH = NAS_DB_PATH if os.path.exists(NAS_DB_PATH) else r"X:\11. VOC, CCM 자료 등\1. VOC 불만접수현황\db\channeltalk_voc.db"
 FALLBACK_DB_PATH = r"C:\Users\hshwa\OneDrive\문서\VOC점검\channeltalk_voc_claim_test.db"
 DEFAULT_OUT_DIR = Path(__file__).resolve().parent.parent / "dashboard"
 
