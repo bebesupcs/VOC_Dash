@@ -6052,10 +6052,11 @@ function renderChannel() {
   const prevAlfResolved = prevAlfInflow.filter((c) => c.alfResolved).length;
   const prevAlfRate = prevAlfTotal > 0 ? ((prevAlfResolved / prevAlfTotal) * 100).toFixed(1) : null;
 
-  const curAgentChat = curVisibleChats.filter((c) => c.channel === "상담사챗");
+  const curAgentChat = curVisibleChats.filter((c) => (c.channel === "채팅" || c.channel === "상담사챗") && c.agent && c.agent !== "ALF (AI 상담)" && c.agent !== "미배정");
   const curAgentChatIn = curAgentChat.filter((c) => c.direction !== "OUTBOUND").length;
   const curAgentChatOut = curAgentChat.filter((c) => c.direction === "OUTBOUND").length;
-  const prevAgentChatTotal = prevVisibleChats.filter((c) => c.channel === "상담사챗").length;
+  const prevAgentChat = prevVisibleChats.filter((c) => (c.channel === "채팅" || c.channel === "상담사챗") && c.agent && c.agent !== "ALF (AI 상담)" && c.agent !== "미배정");
+  const prevAgentChatTotal = prevAgentChat.length;
 
   // 1. KPI Cards (최상단 4대 핵심 지표: 총 건수 / 전화 / 채팅 / 게시판)
   const kpiEl = document.getElementById("channelKpiRow");
@@ -7051,7 +7052,10 @@ function renderCti() {
     }
   }
 
-  // 5. CDR 상세 드릴다운 테이블 렌더링
+  // 5. 전화 인입/발신 문의 유형(태그)별 증감 분석 차트 및 피벗 테이블
+  renderCtiTagAnalysis(cur.calls, prev ? prev.calls : []);
+
+  // 6. CDR 상세 드릴다운 테이블 렌더링
   renderCtiDetailTable(cur.calls);
 }
 
@@ -11436,6 +11440,143 @@ function renderBoardDetail() {
 
       tbody.innerHTML = bodyHtml;
     }
+  }
+}
+
+// ==========================================
+// [신규] 🏷️ 전화(CTI) 인입/발신 문의 유형(태그)별 증감 분석
+// ==========================================
+let ctiTagFilterMode = "all"; // "all" | "inbound" | "outbound"
+
+window.setCtiTagFilterMode = function(mode) {
+  ctiTagFilterMode = mode;
+  const btnAll = document.getElementById("btnCtiTagAll");
+  const btnIn = document.getElementById("btnCtiTagIn");
+  const btnOut = document.getElementById("btnCtiTagOut");
+  const activeClass = "px-2.5 py-1 rounded-md bg-white shadow-xs text-teal-800 font-semibold transition cursor-pointer";
+  const inactiveClass = "px-2.5 py-1 rounded-md text-zinc-600 hover:text-zinc-900 transition cursor-pointer";
+
+  if (btnAll) btnAll.className = (mode === "all" ? activeClass : inactiveClass);
+  if (btnIn) btnIn.className = (mode === "inbound" ? activeClass : inactiveClass);
+  if (btnOut) btnOut.className = (mode === "outbound" ? activeClass : inactiveClass);
+
+  const titleEl = document.getElementById("ctiTagChartTitle");
+  if (titleEl) {
+    if (mode === "all") titleEl.textContent = "Top 통화 태그별 접수량 (전체: 이번 vs 직전)";
+    else if (mode === "inbound") titleEl.textContent = "Top 수신(인바운드) 통화 태그별 접수량 (이번 vs 직전)";
+    else titleEl.textContent = "Top 발신(아웃바운드) 통화 태그별 접수량 (이번 vs 직전)";
+  }
+
+  const period = E.getPeriod();
+  const prevP = E.prevPeriod();
+  const curCti = E.aggregateCti(period);
+  const prevCti = prevP ? E.aggregateCti(prevP) : null;
+  renderCtiTagAnalysis(curCti ? curCti.calls : [], prevCti ? prevCti.calls : []);
+};
+
+function renderCtiTagAnalysis(curCalls, prevCalls) {
+  const chartEl = document.getElementById("ctiTagCompareChart");
+  const tbody = document.getElementById("ctiTagTableBody");
+  if (!chartEl && !tbody) return;
+
+  let curFiltered = curCalls || [];
+  let prevFiltered = prevCalls || [];
+
+  if (ctiTagFilterMode === "inbound") {
+    curFiltered = curFiltered.filter(c => c.dir === "inbound");
+    prevFiltered = prevFiltered.filter(c => c.dir === "inbound");
+  } else if (ctiTagFilterMode === "outbound") {
+    curFiltered = curFiltered.filter(c => c.dir === "outbound");
+    prevFiltered = prevFiltered.filter(c => c.dir === "outbound");
+  }
+
+  const curTagMap = {};
+  const prevTagMap = {};
+
+  curFiltered.forEach(c => {
+    const t = c.tag || "미분류";
+    curTagMap[t] = (curTagMap[t] || 0) + 1;
+  });
+  prevFiltered.forEach(c => {
+    const t = c.tag || "미분류";
+    prevTagMap[t] = (prevTagMap[t] || 0) + 1;
+  });
+
+  const allTags = Array.from(new Set([...Object.keys(curTagMap), ...Object.keys(prevTagMap)])).filter(Boolean);
+  const totCur = curFiltered.length;
+
+  const rows = allTags.map(tag => {
+    const curCnt = curTagMap[tag] || 0;
+    const prevCnt = prevTagMap[tag] || 0;
+    const diff = curCnt - prevCnt;
+    const diffPct = prevCnt > 0 ? ((diff / prevCnt) * 100).toFixed(1) : null;
+    const share = totCur > 0 ? ((curCnt / totCur) * 100).toFixed(1) : "0.0";
+
+    const sample = curFiltered.find(c => c.tag === tag) || prevFiltered.find(c => c.tag === tag);
+    const dir = sample ? sample.dir : "inbound";
+    return { tag, dir, curCnt, prevCnt, diff, diffPct, share };
+  }).sort((a, b) => b.curCnt - a.curCnt);
+
+  // 1. Table
+  if (tbody) {
+    if (!rows.length) {
+      tbody.innerHTML = `<tr><td colspan="7" class="py-6 text-center text-zinc-400">선택 기간 통화 태그 내역이 없습니다.</td></tr>`;
+    } else {
+      tbody.innerHTML = rows.map(r => {
+        let diffBadge = '<span class="text-zinc-400">0</span>';
+        if (r.diff > 0) diffBadge = `<span class="text-rose-600 font-bold">▲+${r.diff}</span>`;
+        else if (r.diff < 0) diffBadge = `<span class="text-teal-700 font-bold">▼${r.diff}</span>`;
+
+        let diffPctBadge = '<span class="text-zinc-400">0.0%</span>';
+        if (r.diffPct != null) {
+          diffPctBadge = `<span class="${Number(r.diffPct) >= 0 ? 'text-rose-600' : 'text-teal-700'} font-semibold">${Number(r.diffPct) >= 0 ? '+' : ''}${r.diffPct}%</span>`;
+        } else if (r.curCnt > 0) {
+          diffPctBadge = `<span class="rounded bg-teal-50 px-1.5 py-0.5 text-[10px] font-semibold text-teal-700">신규</span>`;
+        }
+
+        const dirBadge = (r.dir === "outbound")
+          ? '<span class="rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold text-orange-800">OUT</span>'
+          : '<span class="rounded bg-teal-50 px-1.5 py-0.5 text-[10px] font-semibold text-teal-700">IN</span>';
+
+        return `<tr class="hover:bg-zinc-50">
+          <td class="py-2 px-2.5">${dirBadge}</td>
+          <td class="py-2 px-3 font-medium text-zinc-800 max-w-xs truncate" title="${escapeHtml(r.tag)}">${escapeHtml(r.tag)}</td>
+          <td class="py-2 px-2 text-right tnum font-bold text-zinc-900">${r.curCnt.toLocaleString()}</td>
+          <td class="py-2 px-2 text-right tnum text-zinc-500">${r.prevCnt.toLocaleString()}</td>
+          <td class="py-2 px-2 text-right tnum">${diffBadge}</td>
+          <td class="py-2 px-2 text-right tnum">${diffPctBadge}</td>
+          <td class="py-2 px-2.5 text-right tnum text-teal-800 font-bold">${r.share}%</td>
+        </tr>`;
+      }).join("");
+    }
+  }
+
+  // 2. Chart
+  if (chartEl) {
+    destroyChart("ctiTagCompareChart");
+    const top10 = rows.slice(0, 10);
+    charts["ctiTagCompareChart"] = new Chart(chartEl, {
+      type: "bar",
+      data: {
+        labels: top10.map(r => r.tag.length > 18 ? r.tag.slice(0, 16) + ".." : r.tag),
+        datasets: [
+          { label: "이번 기간", data: top10.map(r => r.curCnt), backgroundColor: "#0f766e", borderRadius: 4 },
+          { label: "직전 기간", data: top10.map(r => r.prevCnt), backgroundColor: "#cbd5e1", borderRadius: 4 }
+        ]
+      },
+      options: {
+        indexAxis: "y",
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: "top", labels: { font: { size: 11 }, boxWidth: 10 } }
+        },
+        scales: {
+          x: { beginAtZero: true },
+          y: { ticks: { font: { size: 10 } } }
+        }
+      }
+    });
   }
 }
 
