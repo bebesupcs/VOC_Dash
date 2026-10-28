@@ -1,0 +1,10 @@
+{
+  "_comment": "채널톡(Channel.io) Open API 연동 설정 파일",
+  "access_key": "690074f7a3671d0b22f5",
+  "access_secret": "f5926f6f2a7ca93b49709126c078a0eb",
+  "db_path": "X:\\11. VOC, CCM 자료 등\\1. VOC 불만접수현황\\db\\channeltalk_voc.db",
+  "fallback_db_path": "D:\\dev\\VOC리포트\\channeltalk_voc.db",
+  "sync_days_back": 55,
+  "batch_size": 200,
+  "auto_export_dashboard": true
+}

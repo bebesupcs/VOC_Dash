@@ -1,0 +1,18 @@
+{
+  "accounts": [
+    {
+      "username": "cx",
+      "password": "bebesup1!",
+      "role": "admin",
+      "name": "CX팀 관리자",
+      "description": "데이터 동기화, 보상내역 관리, 메모/인사이트 편집 및 전체 엑셀 다운로드"
+    },
+    {
+      "username": "bebesup",
+      "password": "bebesup1!",
+      "role": "user",
+      "name": "CX팀 사원",
+      "description": "대시보드 전 지표 탐색, 필터링 및 클레임 사진 열람 (다운로드 제한)"
+    }
+  ]
+}
