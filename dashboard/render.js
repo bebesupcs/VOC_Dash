@@ -6013,6 +6013,7 @@ let channelDirVal = "all";
 
 const DOW_NAMES = ["목요일", "금요일", "토요일", "일요일", "월요일", "화요일", "수요일"];
 
+window.renderChannel = renderChannel;
 function renderChannel() {
   const period = E.getPeriod();
   const prevP = E.prevPeriod();
@@ -6481,6 +6482,19 @@ function renderChannelDetailTable(chats) {
       <td class="py-2.5 px-4 text-zinc-600 break-words max-w-xs">${(c.act || "–").replace(/</g, "&lt;")}</td>
     </tr>`;
   }).join("");
+
+  // 기간 변경 시 현재 활성화된 서브탭 즉시 재동기화 (채팅 상세, 게시판 상세, 클레임 분석 등)
+  if (channelSubTab === "cti") {
+    renderCti();
+  } else if (channelSubTab === "chat") {
+    renderChatDetail();
+  } else if (channelSubTab === "board") {
+    renderBoardDetail();
+  } else if (channelSubTab === "alf") {
+    renderAlf();
+  } else if (channelSubTab === "claim") {
+    renderClaimLeadtimeDetail();
+  }
 }
 
 let channelSubTab = "overview";
@@ -7594,6 +7608,7 @@ function updateQuadrantPillsUI() {
   });
 }
 
+window.renderClaimLeadtimeDetail = renderClaimLeadtimeDetail;
 function renderClaimLeadtimeDetail() {
   const period = E.getPeriod();
   const res = E.analyzeClaimLeadtime(period, claimLeadtimeScope, claimWindowDays);
@@ -7859,68 +7874,79 @@ function renderClaimProcessFlow(s) {
 }
 
 function renderClaimTagMatrix(tagBreakdown, claims) {
-  const tbody = document.getElementById("claimTagTableBody");
-  if (!tbody || !tagBreakdown) return;
-
-  // 1. 사분면 필터 적용 (우측 테이블)
-  const filteredTags = claimQuadrantFilterVal === "all"
-    ? tagBreakdown
-    : tagBreakdown.filter(t => t.quadrant === claimQuadrantFilterVal);
-
-  if (filteredTags.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" class="py-8 text-center text-zinc-400 font-medium">선택하신 사분면에 해당하는 세부 태그가 없습니다.</td></tr>`;
-  } else {
-    tbody.innerHTML = filteredTags.map((t) => {
-      let qBadge = "";
-      if (t.quadrant === "1") qBadge = `<span class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold bg-rose-100 text-rose-800 ring-1 ring-rose-600/20">🚨 1사분면</span>`;
-      else if (t.quadrant === "2") qBadge = `<span class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold bg-amber-100 text-amber-800 ring-1 ring-amber-600/20">⏱️ 2사분면</span>`;
-      else if (t.quadrant === "4") qBadge = `<span class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold bg-sky-100 text-sky-800 ring-1 ring-sky-600/20">🔁 4사분면</span>`;
-      else qBadge = `<span class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-emerald-100 text-emerald-800 ring-1 ring-emerald-600/20">✅ 3사분면</span>`;
-
-      const isSelected = claimSearchTerm && claimSearchTerm === t.tag;
-      const leadDaysStr = (t.avgLeadHours / 24).toFixed(1);
-
-      return `
-        <tr class="hover:bg-zinc-50 transition cursor-pointer ${isSelected ? 'bg-teal-50/80 font-semibold' : ''}" data-tag="${escapeHtml(t.tag)}">
-          <td class="py-2 px-2.5 font-medium text-zinc-800 max-w-[170px] truncate" title="${escapeHtml(t.tag)}">
-            ${escapeHtml(t.tag)}
-          </td>
-          <td class="py-2 px-2 text-right tnum font-semibold text-zinc-900">${t.total}건</td>
-          <td class="py-2 px-2 text-right tnum font-bold ${t.repeatRate >= 20 ? 'text-rose-600' : 'text-zinc-700'}">${t.repeatRate}%</td>
-          <td class="py-2 px-2 text-right tnum font-semibold ${t.avgLeadHours >= 24 ? 'text-amber-700' : 'text-teal-800'}" title="${t.avgLeadHours}시간 (${leadDaysStr}일)">
-            ${t.avgLeadHours}h <span class="text-[10px] text-zinc-500 font-normal">(${leadDaysStr}일)</span>
-          </td>
-          <td class="py-2 px-2 text-center">${qBadge}</td>
-          <td class="py-2 px-2 text-center">
-            <button type="button" class="btn-tag-filter rounded ${isSelected ? 'bg-teal-600 text-white shadow-2xs' : 'bg-zinc-100 text-teal-800 hover:bg-teal-600 hover:text-white'} px-2 py-0.5 text-[10px] font-semibold transition cursor-pointer" data-tag="${escapeHtml(t.tag)}">
-              ${isSelected ? '선택됨 ✓' : '필터'}
-            </button>
-          </td>
-        </tr>
-      `;
-    }).join("");
-  }
-
-  // 태그 테이블의 행 및 필터 버튼 클릭 시 하단 원장 필터링
-  tbody.querySelectorAll(".btn-tag-filter").forEach(b => {
-    b.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const targetTag = b.getAttribute("data-tag");
-      if (claimSearchTerm === targetTag) {
-        claimSearchTerm = "";
-      } else {
-        claimSearchTerm = targetTag;
-      }
-      const searchInput = document.getElementById("claimSearchInput");
-      if (searchInput) searchInput.value = claimSearchTerm;
-      claimPage = 1;
-      renderClaimTagMatrix(tagBreakdown, claims);
-      renderClaimTable(claims);
-
-      const tblSection = document.getElementById("claimDetailTableBody");
-      if (tblSection) tblSection.scrollIntoView({ behavior: "smooth", block: "center" });
-    });
+  // 1. 활성 필터 / 검색 배지 동기화
+  const quadrantPills = document.querySelectorAll("#claimQuadrantPills .btn-quadrant-filter");
+  quadrantPills.forEach((pill) => {
+    const q = pill.dataset.quadrant;
+    if (q === claimQuadrantFilterVal) {
+      pill.className = "btn-quadrant-filter rounded px-2 py-1 font-bold bg-zinc-800 text-white shadow-2xs transition cursor-pointer";
+    } else {
+      const qColors = {
+        "1": "bg-rose-50 text-rose-700 ring-1 ring-rose-600/20 hover:bg-rose-100",
+        "2": "bg-amber-50 text-amber-700 ring-1 ring-amber-600/20 hover:bg-amber-100",
+        "4": "bg-sky-50 text-sky-700 ring-1 ring-sky-600/20 hover:bg-sky-100",
+        "3": "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20 hover:bg-emerald-100",
+        "all": "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
+      };
+      pill.className = `btn-quadrant-filter rounded px-2 py-1 font-semibold ${qColors[q] || "bg-zinc-100 text-zinc-600"} transition cursor-pointer`;
+    }
   });
+
+  // 우측 세부 태그 상세 실적 테이블 렌더링
+  const tagTbody = document.getElementById("claimTagTableBody");
+  if (tagTbody) {
+    if (tagBreakdown.length === 0) {
+      tagTbody.innerHTML = `<tr><td colspan="6" class="py-6 text-center text-zinc-400">분석 대상 클레임 태그가 없습니다.</td></tr>`;
+    } else {
+      tagTbody.innerHTML = tagBreakdown.map((t) => {
+        const isSelected = claimSearchTerm && claimSearchTerm === t.tag;
+        const qBadges = {
+          "1": '<span class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold bg-rose-100 text-rose-800 ring-1 ring-rose-600/20">🚨 1사분면</span>',
+          "2": '<span class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold bg-amber-100 text-amber-800 ring-1 ring-amber-600/20">⏱️ 2사분면</span>',
+          "4": '<span class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold bg-sky-100 text-sky-800 ring-1 ring-sky-600/20">🔁 4사분면</span>',
+          "3": '<span class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-emerald-100 text-emerald-800 ring-1 ring-emerald-600/20">✅ 3사분면</span>'
+        };
+
+        const rowBg = isSelected ? "bg-amber-50/80 font-semibold" : "hover:bg-zinc-50";
+        return `
+          <tr class="${rowBg} transition cursor-pointer" data-tag="${escapeHtml(t.tag)}">
+            <td class="py-2 px-2.5 font-medium text-zinc-900 truncate max-w-[130px]" title="${escapeHtml(t.tag)}">
+              ${escapeHtml(t.tag)}
+            </td>
+            <td class="py-2 px-2 text-right tnum font-bold text-zinc-900">${t.total.toLocaleString()}건</td>
+            <td class="py-2 px-2 text-right tnum font-semibold text-rose-700">${t.repeatRate}%</td>
+            <td class="py-2 px-2 text-right tnum font-semibold text-teal-800">${t.avgLeadHours}h (${(t.avgLeadHours/24).toFixed(1)}일)</td>
+            <td class="py-2 px-2 text-center">${qBadges[t.quadrant] || "–"}</td>
+            <td class="py-2 px-2 text-center">
+              <button type="button" class="btn-tag-filter rounded px-1.5 py-0.5 text-[10px] font-medium bg-zinc-100 text-zinc-700 hover:bg-teal-600 hover:text-white transition">
+                ${isSelected ? "해제" : "원장보기"}
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join("");
+
+      // 테이블 행 클릭 시 해당 태그로 원장 즉시 필터링
+      tagTbody.querySelectorAll("tr[data-tag]").forEach((tr) => {
+        tr.addEventListener("click", () => {
+          const clickedTag = tr.getAttribute("data-tag");
+          if (claimSearchTerm === clickedTag) {
+            claimSearchTerm = "";
+          } else {
+            claimSearchTerm = clickedTag;
+          }
+          const searchInput = document.getElementById("claimSearchInput");
+          if (searchInput) searchInput.value = claimSearchTerm;
+          claimPage = 1;
+          renderClaimTagMatrix(tagBreakdown, claims);
+          renderClaimTable(claims);
+
+          const tblSection = document.getElementById("claimDetailTableBody");
+          if (tblSection) tblSection.scrollIntoView({ behavior: "smooth", block: "center" });
+        });
+      });
+    }
+  }
 
   // 2. 4사분면 버블 차트 렌더링
   destroyChart("claimTagMatrixChart");
@@ -7929,13 +7955,23 @@ function renderClaimTagMatrix(tagBreakdown, claims) {
 
   const maxY = Math.max(...tagBreakdown.map(t => t.avgLeadHours), 0);
   const isFocusScale = claimYScaleMode === "focus" && maxY > 72;
-  const effectiveYMax = isFocusScale ? 72 : Math.max(maxY * 1.15, 48);
+  // 72시간 집중뷰일 때 상단 캡 포인트가 차트 상단 경계선에 딱 붙어 잘리지 않도록 82h까지 여유 헤드룸(Headroom) 부여
+  const effectiveYMax = isFocusScale ? 82 : Math.max(maxY * 1.15, 48);
+
+  // 상단 캡 포인트 분산 배치 계산
+  const cappedList = tagBreakdown.filter(t => isFocusScale && t.avgLeadHours > 72).sort((a, b) => a.repeatRate - b.repeatRate);
+  const cappedYMap = new Map();
+  cappedList.forEach((t, idx) => {
+    // 인접한 X 좌표를 가진 캡 포인트들의 Y축을 71h~74h로 미세 분산하여 글자 겹침 완화
+    const staggerY = 71 + (idx % 2) * 2.5;
+    cappedYMap.set(t.tag, staggerY);
+  });
 
   const bubbleData = tagBreakdown.map(t => {
     let plotY = t.avgLeadHours;
     let isCapped = false;
     if (isFocusScale && t.avgLeadHours > 72) {
-      plotY = 72;
+      plotY = cappedYMap.get(t.tag) || 72;
       isCapped = true;
     }
     return {
@@ -7949,6 +7985,35 @@ function renderClaimTagMatrix(tagBreakdown, claims) {
       quadrant: t.quadrant,
       avgCalls: t.avgCalls
     };
+  });
+
+  // 스마트 라벨 배치 (Collision avoidance): 상단 캡 포인트와 0점 클러스터 겹침 방지
+  bubbleData.forEach((d) => {
+    d.showLabel = (claimQuadrantFilterVal !== "all" && d.quadrant !== claimQuadrantFilterVal)
+      ? false
+      : (d.total >= 3 || d.quadrant === "1" || (claimSearchTerm && claimSearchTerm === d.tag));
+    d.labelAlign = "top";
+    d.labelOffset = 4;
+  });
+
+  // 1) 상단 영역(y >= 68h) 포인트는 상단 경계선 잘림 방지를 위해 align을 'bottom'으로 설정
+  const topCapped = bubbleData.filter(d => d.showLabel && d.y >= 68).sort((a, b) => a.x - b.x);
+  topCapped.forEach((p, idx) => {
+    p.labelAlign = (idx % 2 === 0) ? "bottom" : "top";
+    p.labelOffset = 5;
+  });
+
+  // 2) 3사분면 원점 클러스터 (x <= 8% && y <= 2h) 겹침 방지: 최대 상위 3개만 분산 표기
+  const zeroCluster = bubbleData.filter(d => d.showLabel && d.x <= 8 && d.y <= 2).sort((a, b) => b.total - a.total);
+  const zeroAligns = ["top", "right", "bottom"];
+  zeroCluster.forEach((p, idx) => {
+    if (idx < zeroAligns.length) {
+      p.labelAlign = zeroAligns[idx];
+      p.labelOffset = 5;
+    } else {
+      // 4위 이하는 차트 복잡도 방지를 위해 숨김 (호버 툴팁 및 우측 테이블에서 전체 확인 가능)
+      p.showLabel = false;
+    }
   });
 
   const bgColors = bubbleData.map(d => {
@@ -7985,7 +8050,7 @@ function renderClaimTagMatrix(tagBreakdown, claims) {
     },
     plugins: [quadrantCrosshairPlugin],
     options: {
-      layout: { padding: { top: 12, right: 16, bottom: 8, left: 8 } },
+      layout: { padding: { top: 22, right: 28, bottom: 10, left: 10 } },
       onClick: (evt, elements) => {
         if (!elements.length) return;
         const idx = elements[0].index;
@@ -8030,11 +8095,18 @@ function renderClaimTagMatrix(tagBreakdown, claims) {
         datalabels: {
           display: (ctx) => {
             const d = ctx.dataset.data[ctx.dataIndex];
-            if (claimQuadrantFilterVal !== "all" && d.quadrant !== claimQuadrantFilterVal) return false;
-            return d.total >= 4 || d.quadrant === "1" || (claimSearchTerm && claimSearchTerm === d.tag);
+            return d.showLabel;
           },
-          align: "top",
-          offset: 2,
+          align: (ctx) => {
+            const d = ctx.dataset.data[ctx.dataIndex];
+            return d.labelAlign || "top";
+          },
+          offset: (ctx) => {
+            const d = ctx.dataset.data[ctx.dataIndex];
+            return d.labelOffset || 4;
+          },
+          clamp: true, // 캔버스 영역 밖 잘림(clipping) 방지
+          clip: false,
           font: { weight: "600", size: 10 },
           color: (ctx) => borderColors[ctx.dataIndex],
           formatter: (v) => {
@@ -8048,7 +8120,7 @@ function renderClaimTagMatrix(tagBreakdown, claims) {
       scales: {
         x: {
           min: 0,
-          max: Math.max(...bubbleData.map(d => d.x), 75) + 5,
+          max: Math.max(...bubbleData.map(d => d.x), 75) + 6,
           title: { display: true, text: "재통화율 (%) ➔", font: { size: 11, weight: "bold" }, color: "#64748b" },
           grid: { color: "rgba(0,0,0,.06)" },
           ticks: { font: { size: 10 }, callback: (v) => `${v}%` }
@@ -10894,15 +10966,67 @@ function renderMainTagAnalysis(curChats, prevChats) {
 }
 
 // ==========================================
-// [신규] 💬 채팅상담 상세 분석
+
 // ==========================================
+// [신규] 💬 채팅상담 상세 분석 & ALF 모드 제어
+// ==========================================
+let chatAlfMode = "all"; // "all" | "counselor" | "alf"
+
+window.setChatAlfMode = function(mode) {
+  chatAlfMode = mode;
+  const btnAll = document.getElementById("btnChatAlfAll");
+  const btnExclude = document.getElementById("btnChatAlfExclude");
+  const btnOnly = document.getElementById("btnChatAlfOnly");
+  const badge = document.getElementById("chatAlfStatusBadge");
+  const desc = document.getElementById("chatAlfSubDesc");
+
+  const activeBtnClass = "px-3 py-1.5 rounded-md bg-white shadow-xs text-teal-800 font-bold transition cursor-pointer";
+  const inactiveBtnClass = "px-3 py-1.5 rounded-md text-zinc-600 hover:text-zinc-900 font-medium transition cursor-pointer";
+
+  if (btnAll) btnAll.className = (mode === "all" ? activeBtnClass : inactiveBtnClass);
+  if (btnExclude) btnExclude.className = (mode === "counselor" ? activeBtnClass : inactiveBtnClass);
+  if (btnOnly) btnOnly.className = (mode === "alf" ? activeBtnClass : inactiveBtnClass);
+
+  if (badge) {
+    if (mode === "all") {
+      badge.textContent = "ALF 포함 전체";
+      badge.className = "rounded-full bg-teal-100 px-2.5 py-0.5 text-[10px] font-bold text-teal-800 ring-1 ring-teal-200";
+    } else if (mode === "counselor") {
+      badge.textContent = "상담사 직접 응대";
+      badge.className = "rounded-full bg-blue-100 px-2.5 py-0.5 text-[10px] font-bold text-blue-800 ring-1 ring-blue-200";
+    } else {
+      badge.textContent = "AI 상담(ALF) 전용";
+      badge.className = "rounded-full bg-purple-100 px-2.5 py-0.5 text-[10px] font-bold text-purple-800 ring-1 ring-purple-200";
+    }
+  }
+
+  if (desc) {
+    if (mode === "all") desc.textContent = "상담사 및 AI 챗봇(ALF) 인바운드·아웃바운드 전체 응대 내역";
+    else if (mode === "counselor") desc.textContent = "AI 챗봇(ALF)을 제외한 전문 상담사 인바운드·아웃바운드 처리 내역";
+    else desc.textContent = "AI 챗봇(ALF) 고객 인입, FAQ 응대 및 자체 완결 상담 분석";
+  }
+
+  renderChatDetail();
+};
+
 function renderChatDetail() {
   const period = E.getPeriod();
   if (!period) return;
   const prevP = E.prevPeriod();
 
-  const curChats = E.rawChats(period).filter(c => c.valid && (c.channel === "채팅" || c.channel === "상담사챗" || c.channel === "챗봇(ALF)"));
-  const prevChats = prevP ? E.rawChats(prevP).filter(c => c.valid && (c.channel === "채팅" || c.channel === "상담사챗" || c.channel === "챗봇(ALF)")) : [];
+  let allCurChats = E.rawChats(period).filter(c => c.valid && (c.channel === "채팅" || c.channel === "상담사챗" || c.channel === "챗봇(ALF)"));
+  let allPrevChats = prevP ? E.rawChats(prevP).filter(c => c.valid && (c.channel === "채팅" || c.channel === "상담사챗" || c.channel === "챗봇(ALF)")) : [];
+
+  // ALF 모드 필터링 적용
+  let curChats = allCurChats;
+  let prevChats = allPrevChats;
+  if (chatAlfMode === "counselor") {
+    curChats = allCurChats.filter(c => c.agent && c.agent !== "ALF (AI 상담)" && c.agent !== "미배정");
+    prevChats = allPrevChats.filter(c => c.agent && c.agent !== "ALF (AI 상담)" && c.agent !== "미배정");
+  } else if (chatAlfMode === "alf") {
+    curChats = allCurChats.filter(c => c.agent === "ALF (AI 상담)" || c.alfInflow || c.channel === "챗봇(ALF)");
+    prevChats = allPrevChats.filter(c => c.agent === "ALF (AI 상담)" || c.alfInflow || c.channel === "챗봇(ALF)");
+  }
 
   // 1. KPI Cards
   const kpiEl = document.getElementById("chatKpiRow");
@@ -11024,8 +11148,8 @@ function renderChatDetail() {
         return `<tr class="hover:bg-zinc-50">
           <td class="py-2 px-2.5"><span class="rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">채팅</span></td>
           <td class="py-2 px-3 font-medium text-zinc-800 max-w-xs truncate" title="${escapeHtml(r.tag)}">${escapeHtml(r.tag)}</td>
-          <td class="py-2 px-2 text-right tnum font-bold text-zinc-900">${r.curCnt}</td>
-          <td class="py-2 px-2 text-right tnum text-zinc-500">${r.prevCnt}</td>
+          <td class="py-2 px-2 text-right tnum font-bold text-zinc-900">${r.curCnt.toLocaleString()}</td>
+          <td class="py-2 px-2 text-right tnum text-zinc-500">${r.prevCnt.toLocaleString()}</td>
           <td class="py-2 px-2 text-right tnum">${diffBadge}</td>
           <td class="py-2 px-2 text-right tnum text-zinc-700">${r.diffPctStr}</td>
           <td class="py-2 px-2.5 text-right tnum text-indigo-800 font-bold">${share}%</td>
@@ -11059,7 +11183,7 @@ function renderChatDetail() {
   // 5. Chat Detail Table
   renderChatDetailTable(curChats);
 
-  // Attach search/filter listeners
+  // Attach search/filter listeners only once
   const dirFilter = document.getElementById("chatSubDirFilter");
   const mgrFilter = document.getElementById("chatSubManagerFilter");
   const searchInput = document.getElementById("chatSubSearchInput");
@@ -11099,18 +11223,18 @@ function renderChatDetailTable(chats) {
   });
 
   const mgrSelect = document.getElementById("chatSubManagerFilter");
-  if (mgrSelect && mgrSelect.options && mgrSelect.options.length <= 1) {
+  if (mgrSelect) {
+    const currentSelected = mgrSelect.value || "all";
     const managers = Array.from(new Set(chats.map(c => c.agent || "미배정"))).sort();
-    managers.forEach(m => {
-      const opt = document.createElement("option");
-      opt.value = m;
-      opt.textContent = m;
-      mgrSelect.appendChild(opt);
-    });
+    mgrSelect.innerHTML = `<option value="all">전체 담당자 (${managers.length}명)</option>` +
+      managers.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
+    if (managers.includes(currentSelected)) {
+      mgrSelect.value = currentSelected;
+    }
   }
 
   if (!filtered.length) {
-    tbody.innerHTML = `<tr><td colspan="8" class="py-8 text-center text-zinc-400">검색 조건에 맞는 채팅 상담 내역이 없습니다.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="py-8 text-center text-zinc-400">선택 기간 및 검색 조건에 맞는 채팅 상담 내역이 없습니다.</td></tr>`;
     return;
   }
 
@@ -11143,8 +11267,8 @@ function renderBoardDetail() {
   if (!period) return;
   const prevP = E.prevPeriod();
 
-  const curBoard = E.boardCount(period);
-  const prevBoard = prevP ? E.boardCount(prevP) : 0;
+  const curBoard = E.boardCount(period) || 0;
+  const prevBoard = prevP ? (E.boardCount(prevP) || 0) : 0;
   const diff = curBoard - prevBoard;
 
   const curMalls = E.boardMalls(period) || {};
@@ -11153,11 +11277,12 @@ function renderBoardDetail() {
   // 1. KPI Cards
   const kpiEl = document.getElementById("boardKpiRow");
   if (kpiEl) {
-    const diffPct = prevBoard > 0 ? ((diff / prevBoard) * 100).toFixed(1) : "0.0";
+    const diffPct = prevBoard > 0 ? ((diff / prevBoard) * 100).toFixed(1) : (curBoard > 0 ? "+100" : "0.0");
     const diffStr = diff >= 0 ? `▲+${diff}건 (+${diffPct}%)` : `▼${Math.abs(diff)}건 (${diffPct}%)`;
     const mallCount = Object.keys(curMalls).length;
-    const topMallName = Object.keys(curMalls)[0] || "카카오";
-    const topMallCnt = Object.values(curMalls)[0] || 0;
+    const sortedMallEntries = Object.entries(curMalls).sort((a, b) => b[1] - a[1]);
+    const topMallName = sortedMallEntries.length ? sortedMallEntries[0][0] : "–";
+    const topMallCnt = sortedMallEntries.length ? sortedMallEntries[0][1] : 0;
 
     kpiEl.innerHTML =
       kpiCard("총 게시판 접수건수", `${curBoard.toLocaleString()}건`, prevBoard, {
@@ -11167,70 +11292,150 @@ function renderBoardDetail() {
         subText: `카카오, 네이버, 11번가, 쿠팡 등`
       }) +
       kpiCard("주요 접수 채널 1위", topMallName, null, {
-        subText: `${topMallCnt}건 (점유율 약 ${curBoard > 0 ? ((topMallCnt / curBoard) * 100).toFixed(1) : 0}%)`
+        subText: `${topMallCnt}건 (점유율 ${curBoard > 0 ? ((topMallCnt / curBoard) * 100).toFixed(1) : 0}%)`
       }) +
       kpiCard("게시판 처리 완결율", "100.0%", null, {
         subText: `당일/익일 출고 및 처리 완료`
       });
   }
 
-  // 2. Mall Breakdown Table & Chart
+  // 2. 판매처 데이터 정렬
   const allMalls = Array.from(new Set([...Object.keys(curMalls), ...Object.keys(prevMalls)])).filter(Boolean);
   const mallRows = allMalls.map(m => {
     const cCnt = curMalls[m] || 0;
     const pCnt = prevMalls[m] || 0;
     const d = cCnt - pCnt;
-    const dPct = pCnt > 0 ? ((d / pCnt) * 100).toFixed(1) : (cCnt > 0 ? "+100" : "0.0");
+    const dPct = pCnt > 0 ? ((d / pCnt) * 100).toFixed(1) : null;
     const share = curBoard > 0 ? ((cCnt / curBoard) * 100).toFixed(1) : "0.0";
     return { mall: m, cCnt, pCnt, diff: d, diffPct: dPct, share };
   }).sort((a, b) => b.cCnt - a.cCnt);
 
+  // 3. 주요 판매처 순위 바 차트 (boardMallChart)
+  const barChartEl = document.getElementById("boardMallChart");
+  if (barChartEl) {
+    destroyChart("boardMallChart");
+    const top10 = mallRows.slice(0, 10);
+    charts["boardMallChart"] = new Chart(barChartEl, {
+      type: "bar",
+      data: {
+        labels: top10.map(r => r.mall),
+        datasets: [{
+          label: "게시판 접수건수",
+          data: top10.map(r => r.cCnt),
+          backgroundColor: "#f59e0b",
+          borderRadius: 4
+        }]
+      },
+      options: {
+        indexAxis: "y",
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false }
+        },
+        scales: {
+          x: { beginAtZero: true },
+          y: { ticks: { font: { size: 11, weight: "600" } } }
+        }
+      }
+    });
+  }
+
+  // 4. 판매처별 점유율 비중 도넛 차트 (boardMallDonutChart) & 뱃지 (boardMallTotalBadge)
+  const totalBadge = document.getElementById("boardMallTotalBadge");
+  if (totalBadge) {
+    totalBadge.textContent = `${curBoard.toLocaleString()}건 전수 분석`;
+  }
+
+  const donutChartEl = document.getElementById("boardMallDonutChart");
+  if (donutChartEl) {
+    destroyChart("boardMallDonutChart");
+    const top6 = mallRows.slice(0, 6);
+    const otherCnt = mallRows.slice(6).reduce((s, r) => s + r.cCnt, 0);
+    const dLabels = top6.map(r => r.mall);
+    const dData = top6.map(r => r.cCnt);
+    if (otherCnt > 0) {
+      dLabels.push("기타 (" + (mallRows.length - 6) + "개 몰)");
+      dData.push(otherCnt);
+    }
+    const dColors = ["#f59e0b", "#0f766e", "#0284c7", "#6366f1", "#8b5cf6", "#ec4899", "#94a3b8"];
+
+    charts["boardMallDonutChart"] = new Chart(donutChartEl, {
+      type: "doughnut",
+      data: {
+        labels: dLabels,
+        datasets: [{
+          data: dData,
+          backgroundColor: dColors.slice(0, dLabels.length),
+          borderWidth: 2,
+          borderColor: "#ffffff"
+        }]
+      },
+      options: {
+        cutout: "58%",
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: "right", labels: { font: { size: 10 }, boxWidth: 10 } }
+        }
+      }
+    });
+  }
+
+  // 5. 주요 판매처 피벗 테이블 (boardMallTableBody)
   const tbody = document.getElementById("boardMallTableBody");
+  const thCur = document.getElementById("boardThCur");
+  const thPrev = document.getElementById("boardThPrev");
+
+  if (thCur) thCur.textContent = `이번 접수건수 (${period.key})`;
+  if (thPrev) thPrev.textContent = `직전 접수건수 (${prevP ? prevP.key : "이전"})`;
+
   if (tbody) {
     if (!mallRows.length) {
-      tbody.innerHTML = `<tr><td colspan="6" class="py-6 text-center text-zinc-400">게시판 접수 내역이 없습니다.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="6" class="py-8 text-center text-zinc-400">선택 기간 게시판 접수 내역이 없습니다.</td></tr>`;
     } else {
-      tbody.innerHTML = mallRows.map(r => {
+      let bodyHtml = mallRows.map(r => {
         let diffBadge = '<span class="text-zinc-400">0</span>';
         if (r.diff > 0) diffBadge = `<span class="text-rose-600 font-bold">▲+${r.diff}</span>`;
         else if (r.diff < 0) diffBadge = `<span class="text-teal-700 font-bold">▼${r.diff}</span>`;
+
+        let diffPctBadge = '<span class="text-zinc-400">0.0%</span>';
+        if (r.diffPct != null) {
+          diffPctBadge = `<span class="${Number(r.diffPct) >= 0 ? 'text-rose-600' : 'text-teal-700'} font-semibold">${Number(r.diffPct) >= 0 ? '+' : ''}${r.diffPct}%</span>`;
+        } else if (r.cCnt > 0) {
+          diffPctBadge = `<span class="rounded bg-teal-50 px-1.5 py-0.5 text-[10px] font-semibold text-teal-700">신규</span>`;
+        }
 
         return `<tr class="hover:bg-zinc-50">
           <td class="py-2.5 px-3 font-semibold text-zinc-900">${escapeHtml(r.mall)}</td>
           <td class="py-2.5 px-3 text-right tnum font-bold text-zinc-900">${r.cCnt.toLocaleString()}</td>
           <td class="py-2.5 px-3 text-right tnum text-zinc-500">${r.pCnt.toLocaleString()}</td>
           <td class="py-2.5 px-3 text-right tnum">${diffBadge}</td>
-          <td class="py-2.5 px-3 text-right tnum text-zinc-700 font-semibold">${r.diffPct}%</td>
+          <td class="py-2.5 px-3 text-right tnum">${diffPctBadge}</td>
           <td class="py-2.5 px-3 text-right tnum text-amber-800 font-bold">${r.share}%</td>
         </tr>`;
       }).join("");
-    }
-  }
 
-  // Chart
-  const chartEl = document.getElementById("boardMallComparisonChart");
-  if (chartEl) {
-    destroyChart("boardMallComparisonChart");
-    const top8 = mallRows.slice(0, 8);
-    charts["boardMallComparisonChart"] = new Chart(chartEl, {
-      type: "bar",
-      data: {
-        labels: top8.map(r => r.mall),
-        datasets: [
-          { label: "이번 기간", data: top8.map(r => r.cCnt), backgroundColor: "#f59e0b", borderRadius: 4 },
-          { label: "직전 기간", data: top8.map(r => r.pCnt), backgroundColor: "#cbd5e1", borderRadius: 4 }
-        ]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { position: "top", labels: { font: { size: 11 }, boxWidth: 10 } } },
-        scales: {
-          x: { ticks: { font: { size: 11, weight: "600" } } },
-          y: { beginAtZero: true }
-        }
-      }
-    });
+      // 하단 합계(Total) Row 추가
+      const totDiff = curBoard - prevBoard;
+      let totDiffBadge = '<span class="text-zinc-400">0</span>';
+      if (totDiff > 0) totDiffBadge = `<span class="text-rose-600 font-bold">▲+${totDiff}</span>`;
+      else if (totDiff < 0) totDiffBadge = `<span class="text-teal-700 font-bold">▼${totDiff}</span>`;
+
+      const totDiffPct = prevBoard > 0 ? ((totDiff / prevBoard) * 100).toFixed(1) : "0.0";
+      const totPctBadge = `<span class="${Number(totDiffPct) >= 0 ? 'text-rose-600' : 'text-teal-700'} font-semibold">${Number(totDiffPct) >= 0 ? '+' : ''}${totDiffPct}%</span>`;
+
+      bodyHtml += `<tr class="bg-zinc-100/80 font-bold border-t-2 border-black/10">
+        <td class="py-2.5 px-3 text-zinc-900">전체 합계 (${mallRows.length}개 몰)</td>
+        <td class="py-2.5 px-3 text-right tnum text-zinc-900">${curBoard.toLocaleString()}</td>
+        <td class="py-2.5 px-3 text-right tnum text-zinc-500">${prevBoard.toLocaleString()}</td>
+        <td class="py-2.5 px-3 text-right tnum">${totDiffBadge}</td>
+        <td class="py-2.5 px-3 text-right tnum">${totPctBadge}</td>
+        <td class="py-2.5 px-3 text-right tnum text-amber-800">100.0%</td>
+      </tr>`;
+
+      tbody.innerHTML = bodyHtml;
+    }
   }
 }
 
