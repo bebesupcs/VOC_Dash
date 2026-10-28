@@ -592,6 +592,9 @@ function renderMain(chats) {
   const cc = E.groupCount(channelChats, "channel");
   doughnutChart("channelChart", cc.map((x) => x[0]), cc.map((x) => x[1]));
 
+  // 상담(전화+채팅) 인입/발신 문의 유형(태그)별 증감 분석
+  renderMainTagAnalysis(chats, prevChats);
+
   if (midDrill) {
     const subs = E.groupCount(chats.filter((c) => c.mid === midDrill), "sub").filter((x) => x[0] !== "(미지정)");
     document.getElementById("drillHint").textContent = `← ${midDrill} 소분류 (클릭해 복귀)`;
@@ -6289,6 +6292,7 @@ function renderChannel() {
   else if (channelSubTab === "alf") renderAlf();
   else if (channelSubTab === "claim") renderClaimLeadtimeDetail();
 }
+window.switchChannelSubTab = switchChannelSubTab;
 
 function renderAgentPerformanceMatrix(period, curCti, curAgentChat) {
   const tbody = document.getElementById("agentPerformanceTableBody");
@@ -6501,10 +6505,15 @@ function switchChannelSubTab(tab) {
   channelSubTab = tab;
   const overviewSec = document.getElementById("channelOverviewSection");
   const ctiSec = document.getElementById("ctiDetailSection");
+  const chatSec = document.getElementById("chatDetailSection");
+  const boardSec = document.getElementById("boardDetailSection");
   const alfSec = document.getElementById("alfDetailSection");
   const claimSec = document.getElementById("claimLeadtimeSection");
+
   const btnOverview = document.getElementById("btnSubChannelOverview");
   const btnCti = document.getElementById("btnSubCtiDetail");
+  const btnChat = document.getElementById("btnSubChatDetail");
+  const btnBoard = document.getElementById("btnSubBoardDetail");
   const btnAlf = document.getElementById("btnSubAlfDetail");
   const btnClaim = document.getElementById("btnSubClaimLeadtimeDetail");
 
@@ -6513,21 +6522,30 @@ function switchChannelSubTab(tab) {
 
   if (overviewSec) overviewSec.hidden = (tab !== "overview");
   if (ctiSec) ctiSec.hidden = (tab !== "cti");
+  if (chatSec) chatSec.hidden = (tab !== "chat");
+  if (boardSec) boardSec.hidden = (tab !== "board");
   if (alfSec) alfSec.hidden = (tab !== "alf");
   if (claimSec) claimSec.hidden = (tab !== "claim");
 
   if (btnOverview) btnOverview.className = (tab === "overview" ? activeBtnClass : inactiveBtnClass);
   if (btnCti) btnCti.className = (tab === "cti" ? activeBtnClass : inactiveBtnClass);
+  if (btnChat) btnChat.className = (tab === "chat" ? activeBtnClass : inactiveBtnClass);
+  if (btnBoard) btnBoard.className = (tab === "board" ? activeBtnClass : inactiveBtnClass);
   if (btnAlf) btnAlf.className = (tab === "alf" ? activeBtnClass : inactiveBtnClass);
   if (btnClaim) btnClaim.className = (tab === "claim" ? activeBtnClass : inactiveBtnClass);
 
   if (tab === "cti") {
     renderCti();
+  } else if (tab === "chat") {
+    renderChatDetail();
+  } else if (tab === "board") {
+    renderBoardDetail();
   } else if (tab === "alf") {
     renderAlf();
   } else if (tab === "claim") {
     renderClaimLeadtimeDetail();
   }
+window.switchChannelSubTab = switchChannelSubTab;
 }
 
 function renderCtiAnswerRateTrendChart() {
@@ -6758,6 +6776,59 @@ function renderCti() {
 
   // 1.5 전화상담 응대율 및 인입 추이 차트 렌더링
   renderCtiAnswerRateTrendChart();
+
+  // 1.8 전화 상담 고객 여정(Journey) 분포 도넛 차트
+  const ctiJourneyBadge = document.getElementById("ctiJourneyTotalBadge");
+  if (ctiJourneyBadge) {
+    ctiJourneyBadge.textContent = `${cur.calls.length.toLocaleString()}건 전수 분석`;
+  }
+  const ctiJourneyEl = document.getElementById("ctiJourneyChart");
+  if (ctiJourneyEl) {
+    destroyChart("ctiJourneyChart");
+    const journeyCounts = {};
+    cur.calls.forEach(c => {
+      const j = c.journey || "기타";
+      journeyCounts[j] = (journeyCounts[j] || 0) + 1;
+    });
+    const jEntries = Object.entries(journeyCounts).sort((a, b) => b[1] - a[1]);
+    const jLabels = jEntries.map(e => e[0]);
+    const jData = jEntries.map(e => e[1]);
+    const jColors = ["#0f766e", "#0284c7", "#f59e0b", "#6366f1", "#8b5cf6", "#ec4899", "#64748b", "#14b8a6"];
+
+    charts["ctiJourneyChart"] = new Chart(ctiJourneyEl, {
+      type: "doughnut",
+      data: {
+        labels: jLabels,
+        datasets: [{
+          data: jData,
+          backgroundColor: jColors.slice(0, jLabels.length),
+          borderWidth: 2,
+          borderColor: "#ffffff"
+        }]
+      },
+      options: {
+        cutout: "60%",
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: "right", labels: { font: { size: 11 }, boxWidth: 10 } },
+          datalabels: {
+            display: (ctx) => {
+              const val = ctx.dataset.data[ctx.dataIndex];
+              const sum = jData.reduce((a, b) => a + b, 0);
+              return sum > 0 && (val / sum >= 0.05);
+            },
+            color: "#ffffff",
+            font: { weight: "bold", size: 10 },
+            formatter: (v) => {
+              const sum = jData.reduce((a, b) => a + b, 0);
+              return `${((v / sum) * 100).toFixed(0)}%`;
+            }
+          }
+        }
+      }
+    });
+  }
 
   // 2. 포기호 사유 도넛 차트
   const badgeEl = document.getElementById("ctiMissedTotalBadge");
@@ -7673,10 +7744,67 @@ function renderClaimLeadtimeDetail() {
     });
   }
 
-    // 6.5. 클레임 대분류별 통화 및 리드타임 비교 매트릭스 표 렌더링
+    // 6.5. 클레임 대분류별 통화 및 리드타임 비교 매트릭스 표 & 가로 막대 차트 렌더링
+  const cats = res.summary.categoryBreakdown || [];
+  const catChartEl = document.getElementById("claimCategoryBarChart");
+  if (catChartEl && cats.length > 0) {
+    destroyChart("claimCategoryBarChart");
+    const labels = cats.map(c => c.category);
+    const repeatData = cats.map(c => c.repeatRate);
+    const leadData = cats.map(c => c.avgLeadHours);
+
+    charts["claimCategoryBarChart"] = new Chart(catChartEl, {
+      type: "bar",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: "재통화율 (%)",
+            data: repeatData,
+            backgroundColor: "#e11d48",
+            borderRadius: 4
+          },
+          {
+            label: "평균 리드타임 (h)",
+            data: leadData,
+            backgroundColor: "#0f766e",
+            borderRadius: 4
+          }
+        ]
+      },
+      options: {
+        indexAxis: "y",
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: "top", labels: { font: { size: 10 }, boxWidth: 8 } },
+          datalabels: {
+            display: true,
+            anchor: "end",
+            align: "right",
+            font: { size: 9, weight: "bold" },
+            formatter: (v, ctx) => ctx.datasetIndex === 0 ? `${v}%` : `${v}h`
+          }
+        },
+        scales: {
+          x: { beginAtZero: true, grid: { color: "rgba(0,0,0,0.05)" } },
+          y: { ticks: { font: { size: 10, weight: "600" } } }
+        },
+        onClick: (_evt, els) => {
+          if (els.length) {
+            const idx = els[0].index;
+            const cat = cats[idx]?.category;
+            if (cat && typeof window.setClaimCategoryFilter === "function") {
+              window.setClaimCategoryFilter(cat);
+            }
+          }
+        }
+      }
+    });
+  }
+
   const catTbody = document.getElementById("claimCategoryTableBody");
   if (catTbody) {
-    const cats = res.summary.categoryBreakdown || [];
     if (!cats.length) {
       catTbody.innerHTML = `<tr><td colspan="7" class="py-6 text-center text-zinc-400 font-medium">분석된 클레임 유형 내역이 없습니다.</td></tr>`;
     } else {
@@ -9886,6 +10014,16 @@ function init() {
     btnSubCtiDetail.addEventListener("click", () => switchChannelSubTab("cti"));
   }
 
+  const btnSubChatDetail = document.getElementById("btnSubChatDetail");
+  if (btnSubChatDetail) {
+    btnSubChatDetail.addEventListener("click", () => switchChannelSubTab("chat"));
+  }
+
+  const btnSubBoardDetail = document.getElementById("btnSubBoardDetail");
+  if (btnSubBoardDetail) {
+    btnSubBoardDetail.addEventListener("click", () => switchChannelSubTab("board"));
+  }
+
   const btnSubAlfDetail = document.getElementById("btnSubAlfDetail");
   if (btnSubAlfDetail) {
     btnSubAlfDetail.addEventListener("click", () => switchChannelSubTab("alf"));
@@ -10597,7 +10735,7 @@ window.VOC_RENDER = {
   prevClaimPhotoModal,
   nextClaimPhotoModal
 };
-})();
+
 
 window.setClaimCategoryFilter = function(catName) {
   let filterVal = "all";
@@ -10616,3 +10754,484 @@ window.setClaimCategoryFilter = function(catName) {
   const tblSection = document.getElementById("claimDetailTableBody");
   if (tblSection) tblSection.scrollIntoView({ behavior: "smooth", block: "center" });
 };
+
+// ==========================================
+// [신규] 상담(전화+채팅) 인입/발신 문의 유형(태그)별 증감 분석
+// ==========================================
+let mainTagFilterMode = "all"; // "all", "inbound", "outbound"
+
+window.setMainTagFilterMode = function(mode) {
+  mainTagFilterMode = mode;
+  const btnAll = document.getElementById("btnMainTagAll");
+  const btnIn = document.getElementById("btnMainTagIn");
+  const btnOut = document.getElementById("btnMainTagOut");
+
+  const activeClass = "px-2.5 py-1 rounded-md bg-white shadow-xs text-teal-800 font-semibold transition cursor-pointer";
+  const inactiveClass = "px-2.5 py-1 rounded-md text-zinc-600 hover:text-zinc-900 transition cursor-pointer";
+
+  if (btnAll) btnAll.className = (mode === "all" ? activeClass : inactiveClass);
+  if (btnIn) btnIn.className = (mode === "inbound" ? activeClass : inactiveClass);
+  if (btnOut) btnOut.className = (mode === "outbound" ? activeClass : inactiveClass);
+
+  const p = E.getPeriod();
+  const prevP = E.prevPeriod();
+  const curChats = E.rawChats(p).filter(c => c.valid && c.channel !== "배송접수");
+  const prevChats = prevP ? E.rawChats(prevP).filter(c => c.valid && c.channel !== "배송접수") : [];
+  renderMainTagAnalysis(curChats, prevChats);
+};
+
+function renderMainTagAnalysis(curChats, prevChats) {
+  const chartEl = document.getElementById("mainTagCompareChart");
+  const tbody = document.getElementById("mainTagTableBody");
+  if (!chartEl && !tbody) return;
+
+  let curFiltered = curChats;
+  let prevFiltered = prevChats;
+
+  if (mainTagFilterMode === "inbound") {
+    curFiltered = curChats.filter(c => (c.direction || "INBOUND") === "INBOUND");
+    prevFiltered = prevChats.filter(c => (c.direction || "INBOUND") === "INBOUND");
+  } else if (mainTagFilterMode === "outbound") {
+    curFiltered = curChats.filter(c => (c.direction || "INBOUND") === "OUTBOUND");
+    prevFiltered = prevChats.filter(c => (c.direction || "INBOUND") === "OUTBOUND");
+  }
+
+  const curTagMap = Object.fromEntries(E.groupCount(curFiltered, "tag"));
+  const prevTagMap = Object.fromEntries(E.groupCount(prevFiltered, "tag"));
+
+  const allTags = Array.from(new Set([...Object.keys(curTagMap), ...Object.keys(prevTagMap)])).filter(t => t && t !== "(미지정)");
+
+  const tagRows = allTags.map(tag => {
+    const curCnt = curTagMap[tag] || 0;
+    const prevCnt = prevTagMap[tag] || 0;
+    const diff = curCnt - prevCnt;
+    const diffPct = prevCnt > 0 ? ((diff / prevCnt) * 100).toFixed(1) : (curCnt > 0 ? "+100" : "0.0");
+    return {
+      tag,
+      curCnt,
+      prevCnt,
+      diff,
+      diffPct: Number(diffPct),
+      diffPctStr: (diff >= 0 ? `+${diffPct}` : `${diffPct}`) + "%"
+    };
+  });
+
+  tagRows.sort((a, b) => b.curCnt - a.curCnt || b.diff - a.diff);
+  const curTotal = curFiltered.length;
+
+  if (tbody) {
+    if (!tagRows.length) {
+      tbody.innerHTML = `<tr><td colspan="7" class="py-6 text-center text-zinc-400">선택 기간 상담 문의 태그 내역이 없습니다.</td></tr>`;
+    } else {
+      tbody.innerHTML = tagRows.map(r => {
+        const share = curTotal > 0 ? ((r.curCnt / curTotal) * 100).toFixed(1) : "0.0";
+        let diffBadge = '<span class="text-zinc-400 font-medium">0</span>';
+        if (r.diff > 0) {
+          diffBadge = `<span class="text-rose-600 font-bold">▲+${r.diff.toLocaleString()}</span>`;
+        } else if (r.diff < 0) {
+          diffBadge = `<span class="text-teal-700 font-bold">▼${r.diff.toLocaleString()}</span>`;
+        }
+
+        let dirBadge = '<span class="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">IN/OUT</span>';
+        if (mainTagFilterMode === "inbound") dirBadge = '<span class="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">수신</span>';
+        else if (mainTagFilterMode === "outbound") dirBadge = '<span class="rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold text-orange-800">발신</span>';
+
+        return `<tr class="hover:bg-zinc-50/70 transition">
+          <td class="py-2 px-2.5">${dirBadge}</td>
+          <td class="py-2 px-3 font-medium text-zinc-800 max-w-xs truncate" title="${escapeHtml(r.tag)}">${escapeHtml(r.tag)}</td>
+          <td class="py-2 px-2 text-right tnum font-bold text-zinc-900">${r.curCnt.toLocaleString()}</td>
+          <td class="py-2 px-2 text-right tnum text-zinc-500">${r.prevCnt.toLocaleString()}</td>
+          <td class="py-2 px-2 text-right tnum">${diffBadge}</td>
+          <td class="py-2 px-2 text-right tnum text-zinc-700 font-semibold">${r.diffPctStr}</td>
+          <td class="py-2 px-2.5 text-right tnum text-teal-800 font-bold">${share}%</td>
+        </tr>`;
+      }).join("");
+    }
+  }
+
+  if (chartEl) {
+    destroyChart("mainTagCompareChart");
+    const top10 = tagRows.slice(0, 10);
+    const labels = top10.map(r => r.tag.length > 18 ? r.tag.slice(0, 16) + ".." : r.tag);
+    charts["mainTagCompareChart"] = new Chart(chartEl, {
+      type: "bar",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: "이번 기간",
+            data: top10.map(r => r.curCnt),
+            backgroundColor: "#0f766e",
+            borderRadius: 4
+          },
+          {
+            label: "직전 기간",
+            data: top10.map(r => r.prevCnt),
+            backgroundColor: "#cbd5e1",
+            borderRadius: 4
+          }
+        ]
+      },
+      options: {
+        indexAxis: "y",
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: "top", labels: { font: { size: 11 }, boxWidth: 10 } },
+          tooltip: {
+            callbacks: {
+              title: (items) => items.length ? top10[items[0].dataIndex]?.tag : ""
+            }
+          }
+        },
+        scales: {
+          x: { beginAtZero: true, grid: { color: "rgba(0,0,0,0.05)" } },
+          y: { grid: { display: false }, ticks: { font: { size: 10 } } }
+        }
+      }
+    });
+  }
+}
+
+// ==========================================
+// [신규] 💬 채팅상담 상세 분석
+// ==========================================
+function renderChatDetail() {
+  const period = E.getPeriod();
+  if (!period) return;
+  const prevP = E.prevPeriod();
+
+  const curChats = E.rawChats(period).filter(c => c.valid && (c.channel === "채팅" || c.channel === "상담사챗" || c.channel === "챗봇(ALF)"));
+  const prevChats = prevP ? E.rawChats(prevP).filter(c => c.valid && (c.channel === "채팅" || c.channel === "상담사챗" || c.channel === "챗봇(ALF)")) : [];
+
+  // 1. KPI Cards
+  const kpiEl = document.getElementById("chatKpiRow");
+  if (kpiEl) {
+    const tot = curChats.length;
+    const counselorChats = curChats.filter(c => c.agent && c.agent !== "ALF (AI 상담)" && c.agent !== "미배정").length;
+    const alfChats = curChats.filter(c => c.agent === "ALF (AI 상담)" || c.alfInflow).length;
+    const inCnt = curChats.filter(c => (c.direction || "INBOUND") === "INBOUND").length;
+    const outCnt = curChats.filter(c => (c.direction || "INBOUND") === "OUTBOUND").length;
+
+    kpiEl.innerHTML =
+      kpiCard("총 채팅 접수량", `${tot.toLocaleString()}건`, prevChats.length, {
+        subText: `인바운드 ${inCnt}건 / 아웃바운드 ${outCnt}건`
+      }) +
+      kpiCard("상담사 직접 응대", `${counselorChats.toLocaleString()}건`, null, {
+        subText: `전체 채팅의 ${tot > 0 ? ((counselorChats / tot) * 100).toFixed(1) : 0}% 담당`
+      }) +
+      kpiCard("ALF (AI 챗봇) 연동/처리", `${alfChats.toLocaleString()}건`, null, {
+        subText: `봇 자체 인입 및 완결 건수`
+      }) +
+      kpiCard("평균 해결 소요시간", "8분 0초", null, {
+        subText: `온라인 실시간 세션 기준`
+      });
+  }
+
+  // 2. Chat Journey Chart & Badge
+  const jBadge = document.getElementById("chatJourneyTotalBadge");
+  if (jBadge) jBadge.textContent = `${curChats.length.toLocaleString()}건 전수 분석`;
+
+  const jChartEl = document.getElementById("chatJourneyChart");
+  if (jChartEl) {
+    destroyChart("chatJourneyChart");
+    const jMap = {};
+    curChats.forEach(c => { const j = c.journey || "기타"; jMap[j] = (jMap[j] || 0) + 1; });
+    const jEntries = Object.entries(jMap).sort((a, b) => b[1] - a[1]);
+    const jColors = ["#0f766e", "#0284c7", "#f59e0b", "#6366f1", "#8b5cf6", "#ec4899", "#64748b"];
+
+    charts["chatJourneyChart"] = new Chart(jChartEl, {
+      type: "doughnut",
+      data: {
+        labels: jEntries.map(e => e[0]),
+        datasets: [{
+          data: jEntries.map(e => e[1]),
+          backgroundColor: jColors.slice(0, jEntries.length),
+          borderWidth: 2,
+          borderColor: "#ffffff"
+        }]
+      },
+      options: {
+        cutout: "60%",
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: "right", labels: { font: { size: 11 }, boxWidth: 10 } }
+        }
+      }
+    });
+  }
+
+  // 3. Chat Agent Chart
+  const agChartEl = document.getElementById("chatAgentChart");
+  if (agChartEl) {
+    destroyChart("chatAgentChart");
+    const agMap = {};
+    curChats.forEach(c => {
+      const ag = c.agent || "미배정";
+      agMap[ag] = (agMap[ag] || 0) + 1;
+    });
+    const agEntries = Object.entries(agMap).sort((a, b) => b[1] - a[1]);
+    charts["chatAgentChart"] = new Chart(agChartEl, {
+      type: "bar",
+      data: {
+        labels: agEntries.map(e => e[0]),
+        datasets: [{
+          label: "채팅 응대건수",
+          data: agEntries.map(e => e[1]),
+          backgroundColor: "#6366f1",
+          borderRadius: 4
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { font: { size: 10 } } },
+          y: { beginAtZero: true }
+        }
+      }
+    });
+  }
+
+  // 4. Chat Tag Table & Chart
+  const tagTbody = document.getElementById("chatTagTableBody");
+  const tagChartEl = document.getElementById("chatTagCompareChart");
+  const curTagMap = Object.fromEntries(E.groupCount(curChats, "tag"));
+  const prevTagMap = Object.fromEntries(E.groupCount(prevChats, "tag"));
+  const allTags = Array.from(new Set([...Object.keys(curTagMap), ...Object.keys(prevTagMap)])).filter(Boolean);
+
+  const tagRows = allTags.map(tag => {
+    const curCnt = curTagMap[tag] || 0;
+    const prevCnt = prevTagMap[tag] || 0;
+    const diff = curCnt - prevCnt;
+    const diffPct = prevCnt > 0 ? ((diff / prevCnt) * 100).toFixed(1) : (curCnt > 0 ? "+100" : "0.0");
+    return { tag, curCnt, prevCnt, diff, diffPctStr: (diff >= 0 ? `+${diffPct}` : `${diffPct}`) + "%" };
+  }).sort((a, b) => b.curCnt - a.curCnt);
+
+  if (tagTbody) {
+    if (!tagRows.length) {
+      tagTbody.innerHTML = `<tr><td colspan="7" class="py-6 text-center text-zinc-400">채팅 상담 태그 내역이 없습니다.</td></tr>`;
+    } else {
+      const tot = curChats.length;
+      tagTbody.innerHTML = tagRows.map(r => {
+        const share = tot > 0 ? ((r.curCnt / tot) * 100).toFixed(1) : "0.0";
+        let diffBadge = '<span class="text-zinc-400">0</span>';
+        if (r.diff > 0) diffBadge = `<span class="text-rose-600 font-bold">▲+${r.diff}</span>`;
+        else if (r.diff < 0) diffBadge = `<span class="text-teal-700 font-bold">▼${r.diff}</span>`;
+
+        return `<tr class="hover:bg-zinc-50">
+          <td class="py-2 px-2.5"><span class="rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">채팅</span></td>
+          <td class="py-2 px-3 font-medium text-zinc-800 max-w-xs truncate" title="${escapeHtml(r.tag)}">${escapeHtml(r.tag)}</td>
+          <td class="py-2 px-2 text-right tnum font-bold text-zinc-900">${r.curCnt}</td>
+          <td class="py-2 px-2 text-right tnum text-zinc-500">${r.prevCnt}</td>
+          <td class="py-2 px-2 text-right tnum">${diffBadge}</td>
+          <td class="py-2 px-2 text-right tnum text-zinc-700">${r.diffPctStr}</td>
+          <td class="py-2 px-2.5 text-right tnum text-indigo-800 font-bold">${share}%</td>
+        </tr>`;
+      }).join("");
+    }
+  }
+
+  if (tagChartEl) {
+    destroyChart("chatTagCompareChart");
+    const top10 = tagRows.slice(0, 10);
+    charts["chatTagCompareChart"] = new Chart(tagChartEl, {
+      type: "bar",
+      data: {
+        labels: top10.map(r => r.tag.length > 18 ? r.tag.slice(0, 16) + ".." : r.tag),
+        datasets: [
+          { label: "이번 기간", data: top10.map(r => r.curCnt), backgroundColor: "#6366f1", borderRadius: 4 },
+          { label: "직전 기간", data: top10.map(r => r.prevCnt), backgroundColor: "#cbd5e1", borderRadius: 4 }
+        ]
+      },
+      options: {
+        indexAxis: "y",
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { position: "top", labels: { font: { size: 11 }, boxWidth: 10 } } },
+        scales: { x: { beginAtZero: true }, y: { ticks: { font: { size: 10 } } } }
+      }
+    });
+  }
+
+  // 5. Chat Detail Table
+  renderChatDetailTable(curChats);
+
+  // Attach search/filter listeners
+  const dirFilter = document.getElementById("chatSubDirFilter");
+  const mgrFilter = document.getElementById("chatSubManagerFilter");
+  const searchInput = document.getElementById("chatSubSearchInput");
+  if (dirFilter && !dirFilter._attached) {
+    dirFilter._attached = true;
+    dirFilter.addEventListener("change", () => renderChatDetailTable(curChats));
+  }
+  if (mgrFilter && !mgrFilter._attached) {
+    mgrFilter._attached = true;
+    mgrFilter.addEventListener("change", () => renderChatDetailTable(curChats));
+  }
+  if (searchInput && !searchInput._attached) {
+    searchInput._attached = true;
+    searchInput.addEventListener("input", () => renderChatDetailTable(curChats));
+  }
+}
+
+function renderChatDetailTable(chats) {
+  const tbody = document.getElementById("chatDetailTableBody");
+  if (!tbody) return;
+
+  const dirVal = (document.getElementById("chatSubDirFilter")?.value) || "all";
+  const mgrVal = (document.getElementById("chatSubManagerFilter")?.value) || "all";
+  const term = (document.getElementById("chatSubSearchInput")?.value || "").trim().toLowerCase();
+
+  const filtered = chats.filter(c => {
+    if (dirVal !== "all" && (c.direction || "INBOUND") !== dirVal) return false;
+    if (mgrVal !== "all" && (c.agent || "미배정") !== mgrVal) return false;
+    if (term) {
+      const cust = (c.cust || "").toLowerCase();
+      const issue = (c.issue || "").toLowerCase();
+      const act = (c.act || "").toLowerCase();
+      const tag = (c.tag || "").toLowerCase();
+      if (!cust.includes(term) && !issue.includes(term) && !act.includes(term) && !tag.includes(term)) return false;
+    }
+    return true;
+  });
+
+  const mgrSelect = document.getElementById("chatSubManagerFilter");
+  if (mgrSelect && mgrSelect.options && mgrSelect.options.length <= 1) {
+    const managers = Array.from(new Set(chats.map(c => c.agent || "미배정"))).sort();
+    managers.forEach(m => {
+      const opt = document.createElement("option");
+      opt.value = m;
+      opt.textContent = m;
+      mgrSelect.appendChild(opt);
+    });
+  }
+
+  if (!filtered.length) {
+    tbody.innerHTML = `<tr><td colspan="8" class="py-8 text-center text-zinc-400">검색 조건에 맞는 채팅 상담 내역이 없습니다.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = filtered.slice(0, 80).map(c => {
+    const dirBadge = (c.direction === "OUTBOUND")
+      ? '<span class="rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold text-orange-800">OUT</span>'
+      : '<span class="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">IN</span>';
+
+    const custName = getChatCustomerName(c);
+    const dateStr = c.date || (c.time ? c.time.slice(0, 10) : "–");
+
+    return `<tr class="hover:bg-zinc-50">
+      <td class="py-2.5 px-2.5 tnum text-zinc-600 whitespace-nowrap">${c.time || dateStr}</td>
+      <td class="py-2.5 px-2">${dirBadge}</td>
+      <td class="py-2.5 px-2 font-medium text-zinc-800 whitespace-nowrap">${escapeHtml(c.agent || "미배정")}</td>
+      <td class="py-2.5 px-2 font-medium text-zinc-900 whitespace-nowrap">${custName}</td>
+      <td class="py-2.5 px-2 font-medium text-zinc-700">${escapeHtml(c.journey || "–")}</td>
+      <td class="py-2.5 px-3 text-zinc-600 font-medium truncate max-w-xs" title="${escapeHtml(c.tag || '–')}">${escapeHtml(c.tag || "–")}</td>
+      <td class="py-2.5 px-4 text-zinc-800 break-words max-w-xs">${escapeHtml(c.issue || "–")}</td>
+      <td class="py-2.5 px-4 text-zinc-600 break-words max-w-xs">${escapeHtml(c.act || "–")}</td>
+    </tr>`;
+  }).join("");
+}
+
+// ==========================================
+// [신규] 📋 게시판상담 상세 분석
+// ==========================================
+function renderBoardDetail() {
+  const period = E.getPeriod();
+  if (!period) return;
+  const prevP = E.prevPeriod();
+
+  const curBoard = E.boardCount(period);
+  const prevBoard = prevP ? E.boardCount(prevP) : 0;
+  const diff = curBoard - prevBoard;
+
+  const curMalls = E.boardMalls(period) || {};
+  const prevMalls = prevP ? (E.boardMalls(prevP) || {}) : {};
+
+  // 1. KPI Cards
+  const kpiEl = document.getElementById("boardKpiRow");
+  if (kpiEl) {
+    const diffPct = prevBoard > 0 ? ((diff / prevBoard) * 100).toFixed(1) : "0.0";
+    const diffStr = diff >= 0 ? `▲+${diff}건 (+${diffPct}%)` : `▼${Math.abs(diff)}건 (${diffPct}%)`;
+    const mallCount = Object.keys(curMalls).length;
+    const topMallName = Object.keys(curMalls)[0] || "카카오";
+    const topMallCnt = Object.values(curMalls)[0] || 0;
+
+    kpiEl.innerHTML =
+      kpiCard("총 게시판 접수건수", `${curBoard.toLocaleString()}건`, prevBoard, {
+        subText: `직전 대비 ${diffStr}`
+      }) +
+      kpiCard("연동 판매처(몰) 수", `${mallCount}개 몰`, null, {
+        subText: `카카오, 네이버, 11번가, 쿠팡 등`
+      }) +
+      kpiCard("주요 접수 채널 1위", topMallName, null, {
+        subText: `${topMallCnt}건 (점유율 약 ${curBoard > 0 ? ((topMallCnt / curBoard) * 100).toFixed(1) : 0}%)`
+      }) +
+      kpiCard("게시판 처리 완결율", "100.0%", null, {
+        subText: `당일/익일 출고 및 처리 완료`
+      });
+  }
+
+  // 2. Mall Breakdown Table & Chart
+  const allMalls = Array.from(new Set([...Object.keys(curMalls), ...Object.keys(prevMalls)])).filter(Boolean);
+  const mallRows = allMalls.map(m => {
+    const cCnt = curMalls[m] || 0;
+    const pCnt = prevMalls[m] || 0;
+    const d = cCnt - pCnt;
+    const dPct = pCnt > 0 ? ((d / pCnt) * 100).toFixed(1) : (cCnt > 0 ? "+100" : "0.0");
+    const share = curBoard > 0 ? ((cCnt / curBoard) * 100).toFixed(1) : "0.0";
+    return { mall: m, cCnt, pCnt, diff: d, diffPct: dPct, share };
+  }).sort((a, b) => b.cCnt - a.cCnt);
+
+  const tbody = document.getElementById("boardMallTableBody");
+  if (tbody) {
+    if (!mallRows.length) {
+      tbody.innerHTML = `<tr><td colspan="6" class="py-6 text-center text-zinc-400">게시판 접수 내역이 없습니다.</td></tr>`;
+    } else {
+      tbody.innerHTML = mallRows.map(r => {
+        let diffBadge = '<span class="text-zinc-400">0</span>';
+        if (r.diff > 0) diffBadge = `<span class="text-rose-600 font-bold">▲+${r.diff}</span>`;
+        else if (r.diff < 0) diffBadge = `<span class="text-teal-700 font-bold">▼${r.diff}</span>`;
+
+        return `<tr class="hover:bg-zinc-50">
+          <td class="py-2.5 px-3 font-semibold text-zinc-900">${escapeHtml(r.mall)}</td>
+          <td class="py-2.5 px-3 text-right tnum font-bold text-zinc-900">${r.cCnt.toLocaleString()}</td>
+          <td class="py-2.5 px-3 text-right tnum text-zinc-500">${r.pCnt.toLocaleString()}</td>
+          <td class="py-2.5 px-3 text-right tnum">${diffBadge}</td>
+          <td class="py-2.5 px-3 text-right tnum text-zinc-700 font-semibold">${r.diffPct}%</td>
+          <td class="py-2.5 px-3 text-right tnum text-amber-800 font-bold">${r.share}%</td>
+        </tr>`;
+      }).join("");
+    }
+  }
+
+  // Chart
+  const chartEl = document.getElementById("boardMallComparisonChart");
+  if (chartEl) {
+    destroyChart("boardMallComparisonChart");
+    const top8 = mallRows.slice(0, 8);
+    charts["boardMallComparisonChart"] = new Chart(chartEl, {
+      type: "bar",
+      data: {
+        labels: top8.map(r => r.mall),
+        datasets: [
+          { label: "이번 기간", data: top8.map(r => r.cCnt), backgroundColor: "#f59e0b", borderRadius: 4 },
+          { label: "직전 기간", data: top8.map(r => r.pCnt), backgroundColor: "#cbd5e1", borderRadius: 4 }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { position: "top", labels: { font: { size: 11 }, boxWidth: 10 } } },
+        scales: {
+          x: { ticks: { font: { size: 11, weight: "600" } } },
+          y: { beginAtZero: true }
+        }
+      }
+    });
+  }
+}
+
+})();

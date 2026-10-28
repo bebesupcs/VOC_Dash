@@ -22,6 +22,18 @@ if sys.stdout.encoding != 'utf-8':
     except Exception:
         pass
 
+import socket
+
+def get_local_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('8.8.8.8', 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "192.168.0.22"
+
 PORT = 8080
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DIRECTORY = str(PROJECT_ROOT / "dashboard")
@@ -93,10 +105,19 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.end_headers()
+            cur_ip = get_local_ip()
+            tun_url = tunnel_info.get("url")
+            if not tun_url:
+                url_file = Path(DIRECTORY) / "public_url.txt"
+                if url_file.exists():
+                    try:
+                        tun_url = url_file.read_text(encoding="utf-8").strip()
+                    except Exception:
+                        pass
             info = {
                 "local": f"http://localhost:{PORT}",
-                "network": f"http://192.168.0.24:{PORT}",
-                "tunnel": tunnel_info.get("url")
+                "network": f"http://{cur_ip}:{PORT}",
+                "tunnel": tun_url
             }
             self.wfile.write(json.dumps(info, ensure_ascii=False).encode("utf-8"))
             return
@@ -402,10 +423,11 @@ if __name__ == "__main__":
     start_cloudflare_tunnel()
     # 0.0.0.0 바인딩으로 로컬 및 사내 IP 접속 모두 허용 (멀티스레드 지원)
     with ThreadedTCPServer(("0.0.0.0", PORT), CustomHandler) as httpd:
+        cur_ip = get_local_ip()
         print("==================================================")
         print("[START] 베베숲 VOC 대시보드 항시 가동 서버 시작!")
         print(f" - 로컬 PC 접속:     http://localhost:{PORT}")
-        print(f" - 사내 와이파이:    http://192.168.0.24:{PORT}")
+        print(f" - 사내 와이파이:    http://{cur_ip}:{PORT}")
         print(f" - 외부/재택/모바일:  Cloudflare 보안 터널 주소 연결 중...")
         print("==================================================")
         try:
