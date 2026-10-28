@@ -1184,6 +1184,8 @@ function fillFilters() {
   updateFilterActiveBadges();
 }
 
+let selectedYearFilter = "all";
+
 function renderPeriodControls() {
   const period = E.getPeriod();
   if (!period) return;
@@ -1192,7 +1194,38 @@ function renderPeriodControls() {
   const maxIdx = list.length - 1;
   const curIdx = E.state.periodIndex;
 
-  // 1. periodLabel 텍스트 갱신 (호환성 유지)
+  // 1. 연도 선택 셀렉트박스 동적 구성 (A안: 데이터 기반 자동 연도 추출 및 필터링)
+  const yContainer = document.getElementById("yearSelectContainer");
+  const ySelect = document.getElementById("yearSelect");
+  const isYearlyMode = (E.state.mode === "yearly");
+
+  if (yContainer) {
+    yContainer.style.display = isYearlyMode ? "none" : "flex";
+  }
+
+  // 데이터 내 존재하는 모든 연도 동적 추출 (2025, 2026, 2027...)
+  const allYears = Array.from(
+    new Set(list.map((p) => (p.key || "").slice(0, 4)).filter((y) => /^\d{4}$/.test(y)))
+  ).sort().reverse();
+
+  if (ySelect && !isYearlyMode && allYears.length > 0) {
+    if (selectedYearFilter !== "all" && !allYears.includes(selectedYearFilter)) {
+      selectedYearFilter = "all";
+    }
+
+    const yOptions = [
+      `<option value="all">전체 연도 (${allYears[allYears.length - 1]}~${allYears[0]})</option>`,
+      ...allYears.map((y) => `<option value="${y}">${y}년</option>`)
+    ].join("");
+
+    if (ySelect.dataset.renderedYears !== allYears.join(",")) {
+      ySelect.innerHTML = yOptions;
+      ySelect.dataset.renderedYears = allYears.join(",");
+    }
+    ySelect.value = selectedYearFilter;
+  }
+
+  // 2. periodLabel 텍스트 갱신 (호환성 유지)
   const pLabelEl = document.getElementById("periodLabel");
   let curLabelText = "";
   if (E.state.mode === "weekly") {
@@ -1207,10 +1240,17 @@ function renderPeriodControls() {
   }
   if (pLabelEl) pLabelEl.textContent = curLabelText;
 
-  // 2. periodSelect 빠른 기간 선택 드롭다운 옵션 구성 (최신순 역순 정렬)
+  // 3. periodSelect 옵션 구성 (선택된 연도 필터 적용 및 최신순 역순 정렬)
   const pSelect = document.getElementById("periodSelect");
+  const filteredItems = list
+    .map((p, idx) => ({ p, idx }))
+    .filter(({ p }) => {
+      if (isYearlyMode || selectedYearFilter === "all") return true;
+      return (p.key || "").startsWith(selectedYearFilter);
+    });
+
   if (pSelect) {
-    const optionsHtml = list.map((p, idx) => {
+    const optionsHtml = filteredItems.map(({ p, idx }) => {
       let optLabel = "";
       const isLatest = (idx === maxIdx);
       const tag = isLatest ? " [현재]" : "";
@@ -1218,7 +1258,7 @@ function renderPeriodControls() {
       if (E.state.mode === "weekly") {
         const weekName = p.week_of_month || formatPeriodDisplayLabel(p, "weekly");
         const dateRange = p.label ? p.label.replace(/202[56]년\s*/, "") : "";
-        optLabel = `${weekName} (${dateRange})${tag}`;
+        optLabel = `${p.key?.slice(0, 4)}년 ${weekName} (${dateRange})${tag}`;
       } else if (E.state.mode === "yearly") {
         const yr = (p.key || "").slice(0, 4);
         optLabel = `${yr}년 연간${tag}`;
@@ -1232,21 +1272,23 @@ function renderPeriodControls() {
     pSelect.value = String(curIdx);
   }
 
-  // 3. ◀, ▶ 버튼 상태
+  // 4. ◀, ▶ 버튼 상태 (필터링된 목록 내 위치 기준)
+  const curFilteredPos = filteredItems.findIndex(it => it.idx === curIdx);
   const prevBtn = document.getElementById("prevBtn");
   const nextBtn = document.getElementById("nextBtn");
   if (prevBtn) {
-    prevBtn.disabled = curIdx <= 0;
-    prevBtn.classList.toggle("opacity-30", curIdx <= 0);
-    prevBtn.classList.toggle("cursor-not-allowed", curIdx <= 0);
+    prevBtn.disabled = curFilteredPos <= 0;
+    prevBtn.classList.toggle("opacity-30", curFilteredPos <= 0);
+    prevBtn.classList.toggle("cursor-not-allowed", curFilteredPos <= 0);
   }
   if (nextBtn) {
-    nextBtn.disabled = curIdx >= maxIdx;
-    nextBtn.classList.toggle("opacity-30", curIdx >= maxIdx);
-    nextBtn.classList.toggle("cursor-not-allowed", curIdx >= maxIdx);
+    const isAtEnd = (curFilteredPos >= filteredItems.length - 1 || curFilteredPos < 0);
+    nextBtn.disabled = isAtEnd;
+    nextBtn.classList.toggle("opacity-30", isAtEnd);
+    nextBtn.classList.toggle("cursor-not-allowed", isAtEnd);
   }
 
-  // 4. 모드 버튼 활성화 표시
+  // 5. 모드 버튼 활성화 표시
   document.querySelectorAll(".mode-btn").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === E.state.mode)));
 }
 
@@ -9842,6 +9884,24 @@ function init() {
     else renderAll();
   }
 
+  // 연도 선택 셀렉트박스 변경 이벤트 (A안)
+  const ySelectEl = document.getElementById("yearSelect");
+  if (ySelectEl) {
+    ySelectEl.addEventListener("change", (e) => {
+      selectedYearFilter = e.target.value;
+      const list = E.getPeriodList();
+      if (selectedYearFilter !== "all") {
+        const matches = list
+          .map((p, idx) => ({ p, idx }))
+          .filter(({ p }) => (p.key || "").startsWith(selectedYearFilter));
+        if (matches.length > 0) {
+          E.state.periodIndex = matches[matches.length - 1].idx;
+        }
+      }
+      refreshCurrentView();
+    });
+  }
+
   document.querySelectorAll(".mode-btn").forEach((b) => b.addEventListener("click", () => {
     E.state.mode = b.dataset.mode;
     E.state.periodIndex = E.getPeriodList().length - 1;
@@ -9849,16 +9909,27 @@ function init() {
   }));
 
   document.getElementById("prevBtn").addEventListener("click", () => {
-    if (E.state.periodIndex > 0) {
-      E.state.periodIndex--;
+    const list = E.getPeriodList();
+    const isYearly = (E.state.mode === "yearly");
+    const filtered = list
+      .map((p, idx) => ({ p, idx }))
+      .filter(({ p }) => isYearly || selectedYearFilter === "all" || (p.key || "").startsWith(selectedYearFilter));
+    const pos = filtered.findIndex(it => it.idx === E.state.periodIndex);
+    if (pos > 0) {
+      E.state.periodIndex = filtered[pos - 1].idx;
       refreshCurrentView();
     }
   });
 
   document.getElementById("nextBtn").addEventListener("click", () => {
-    const max = E.getPeriodList().length - 1;
-    if (E.state.periodIndex < max) {
-      E.state.periodIndex++;
+    const list = E.getPeriodList();
+    const isYearly = (E.state.mode === "yearly");
+    const filtered = list
+      .map((p, idx) => ({ p, idx }))
+      .filter(({ p }) => isYearly || selectedYearFilter === "all" || (p.key || "").startsWith(selectedYearFilter));
+    const pos = filtered.findIndex(it => it.idx === E.state.periodIndex);
+    if (pos >= 0 && pos < filtered.length - 1) {
+      E.state.periodIndex = filtered[pos + 1].idx;
       refreshCurrentView();
     }
   });
@@ -9870,19 +9941,31 @@ function init() {
       const selectedIdx = parseInt(e.target.value, 10);
       if (!isNaN(selectedIdx) && selectedIdx >= 0 && selectedIdx < E.getPeriodList().length) {
         E.state.periodIndex = selectedIdx;
+        const chosen = E.getPeriodList()[selectedIdx];
+        if (chosen && chosen.key) {
+          const chosenYear = chosen.key.slice(0, 4);
+          if (selectedYearFilter !== "all" && selectedYearFilter !== chosenYear) {
+            selectedYearFilter = chosenYear;
+          }
+        }
         refreshCurrentView();
       }
     });
   }
 
-  // 현재(최신) 빠른 이동 버튼 이벤트
+  // 현재(최신) 빠른 이동 버튼 이벤트 (피드백 토스트 포함)
   const latestBtnEl = document.getElementById("latestPeriodBtn");
   if (latestBtnEl) {
     latestBtnEl.addEventListener("click", () => {
+      selectedYearFilter = "all";
+      const ySel = document.getElementById("yearSelect");
+      if (ySel) ySel.value = "all";
       const maxIdx = E.getPeriodList().length - 1;
-      if (E.state.periodIndex !== maxIdx) {
-        E.state.periodIndex = maxIdx;
-        refreshCurrentView();
+      const isAlreadyLatest = (E.state.periodIndex === maxIdx);
+      E.state.periodIndex = maxIdx;
+      refreshCurrentView();
+      if (typeof showToast === "function") {
+        showToast(isAlreadyLatest ? "현재 이미 가장 최신 기간(현재)을 보고 있습니다." : "⚡ 가장 최신 기간(현재)으로 이동했습니다.");
       }
     });
   }

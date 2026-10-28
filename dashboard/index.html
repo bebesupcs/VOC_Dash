@@ -805,27 +805,15 @@
         </div>
 
 
-
-        <!-- 연도 빠른 선택 탭 (2026년 / 2025년 / 전체) -->
-
-
-
-        <div id="yearFilterGroup" class="mt-2 grid grid-cols-3 gap-1 rounded-md bg-zinc-200/50 p-0.5 text-center text-[11px]">
-
-
-
-          <button type="button" data-year="2026" class="year-pill active rounded bg-white py-0.5 font-bold text-teal-800 shadow-2xs transition">2026년</button>
-
-
-
-          <button type="button" data-year="2025" class="year-pill rounded py-0.5 font-medium text-zinc-600 hover:text-zinc-900 transition">2025년</button>
-
-
-
-          <button type="button" data-year="all" class="year-pill rounded py-0.5 font-medium text-zinc-600 hover:text-zinc-900 transition">전체</button>
-
-
-
+        <!-- 동적 연도 선택 드롭다운 (A안: 데이터 연동 자동 확장) -->
+        <div id="yearSelectContainer" class="mt-2 flex items-center justify-between gap-1.5 text-xs">
+          <label for="yearSelect" class="shrink-0 text-[11px] font-semibold text-zinc-500">연도 필터</label>
+          <div class="relative flex-1 min-w-0">
+            <select id="yearSelect" class="w-full appearance-none rounded-md bg-white py-1 pl-2.5 pr-6 text-xs font-bold text-zinc-800 ring-1 ring-black/10 hover:ring-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-600 cursor-pointer text-center shadow-2xs transition">
+              <!-- JS 동적 생성: 최신순 연도 및 전체 옵션 -->
+            </select>
+            <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2 text-zinc-400 text-[10px]">▼</div>
+          </div>
         </div>
 
 
