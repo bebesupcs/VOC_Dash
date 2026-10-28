@@ -4463,7 +4463,7 @@ function renderQualityDetailTable(qChats) {
     const emptyMsg = qualitySelectedTag
       ? `선택된 불만 유형 [${qualitySelectedTag}]에 해당하는 접수 내역이 없습니다.`
       : "검색 조건에 맞는 품질 클레임 건이 없습니다.";
-    tbody.innerHTML = `<tr><td colspan="8" class="py-6 text-center text-zinc-400">${emptyMsg}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" class="py-6 text-center text-zinc-400">${emptyMsg}</td></tr>`;
     return;
   }
 
@@ -4476,12 +4476,14 @@ function renderQualityDetailTable(qChats) {
         : '<span class="rounded bg-zinc-200 px-1.5 py-0.5 text-[10px] font-medium text-zinc-700">LOW</span>';
 
     const custName = getChatCustomerName(c);
+    const dateStr = c.date || (c.time ? c.time.slice(0, 10) : "–");
 
     return `<tr class="hover:bg-zinc-50">
       <td class="py-2.5 px-2">${riskBadge}</td>
+      <td class="py-2.5 px-2 tnum text-zinc-600 whitespace-nowrap">${dateStr}</td>
       <td class="py-2.5 px-2 font-medium text-zinc-700">${c.mid || ""} / ${c.sub || ""}</td>
+      <td class="py-2.5 px-3 font-medium text-zinc-900">${c.prod || "–"}</td>
       <td class="py-2.5 px-2 font-medium text-zinc-900 whitespace-nowrap">${custName}</td>
-      <td class="py-2.5 px-3 font-medium text-zinc-900">${c.prod || ""}</td>
       <td class="py-2.5 px-2 tnum text-zinc-500">${formatMfgDate(c.mfg)}</td>
       <td class="py-2.5 px-2 text-zinc-600">${c.mall || "–"}</td>
       <td class="py-2.5 px-4 text-zinc-800 break-words max-w-xs">${(c.issue || "–").replace(/</g, "&lt;")}</td>
@@ -5406,7 +5408,7 @@ function renderDeliveryDetailTable(shipments) {
     const emptyMsg = deliverySelectedType
       ? `선택된 배송 유형 [${deliverySelectedType}]에 해당하는 배송 클레임 건이 없습니다.`
       : (vFilter !== "all" ? `선택된 벤더 [${vFilter}]에 해당하는 배송 클레임 건이 없습니다.` : "검색 조건에 맞는 배송 클레임 건이 없습니다.");
-    tbody.innerHTML = `<tr><td colspan="8" class="py-6 text-center text-zinc-400">${emptyMsg}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" class="py-6 text-center text-zinc-400">${emptyMsg}</td></tr>`;
     return;
   }
 
@@ -5424,11 +5426,14 @@ function renderDeliveryDetailTable(shipments) {
         ? '<span class="rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">MED</span>'
         : '<span class="rounded bg-zinc-200 px-1.5 py-0.5 text-[10px] font-medium text-zinc-700">LOW</span>';
 
+    const dateStr = s.date || (s.time ? s.time.slice(0, 10) : "–");
+
     return `<tr class="hover:bg-zinc-50">
       <td class="py-2.5 px-2">${vBadge}</td>
+      <td class="py-2.5 px-2 tnum text-zinc-600 whitespace-nowrap">${dateStr}</td>
       <td class="py-2.5 px-2 font-medium text-zinc-800">${s.type || "–"}</td>
       <td class="py-2.5 px-2">${riskBadge}</td>
-      <td class="py-2.5 px-2 text-zinc-700">${s.cust || "–"}</td>
+      <td class="py-2.5 px-2 text-zinc-700 whitespace-nowrap">${s.cust || "–"}</td>
       <td class="py-2.5 px-2 tnum font-mono text-zinc-600">${s.invoice || "–"}</td>
       <td class="py-2.5 px-3 font-medium text-zinc-900">${s.prod || "–"}</td>
       <td class="py-2.5 px-4 text-zinc-800 break-words max-w-xs">${(s.text || "–").replace(/</g, "&lt;")}</td>
@@ -5951,7 +5956,7 @@ function renderServiceDetailTable(sChats) {
     if (catFilter === "escalation_all") emptyMsg = "선택 기간 접수된 에스컬레이션/시스템/고위험 클레임이 없습니다.";
     else if (catFilter === "high_risk") emptyMsg = "선택 기간 접수된 고위험(HIGH) 클레임이 없습니다.";
     else if (serviceSelectedSub) emptyMsg = `선택된 서비스 불만 유형 [${serviceSelectedSub}]에 해당하는 접수 내역이 없습니다.`;
-    tbody.innerHTML = `<tr><td colspan="8" class="py-6 text-center text-zinc-400">${emptyMsg}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" class="py-6 text-center text-zinc-400">${emptyMsg}</td></tr>`;
     return;
   }
 
@@ -5983,8 +5988,11 @@ function renderServiceDetailTable(sChats) {
 
     const rowBg = c.risk === "HIGH" ? "bg-rose-50/50 hover:bg-rose-100/60" : "hover:bg-zinc-50";
 
+    const dateStr = c.date || (c.time ? c.time.slice(0, 10) : "–");
+
     return `<tr class="${rowBg} transition">
       <td class="py-2.5 px-2"><div class="flex items-center gap-1">${catBadge}${riskBadge}</div></td>
+      <td class="py-2.5 px-2 tnum text-zinc-600 whitespace-nowrap">${dateStr}</td>
       <td class="py-2.5 px-2 font-medium text-zinc-800">${sub}</td>
       <td class="py-2.5 px-2 font-medium text-zinc-900 whitespace-nowrap">${custName}</td>
       <td class="py-2.5 px-2 text-zinc-600">${c.channel || "채널톡"}</td>
@@ -6436,7 +6444,7 @@ function renderChannelDetailTable(chats) {
   });
 
   if (!filtered.length) {
-    tbody.innerHTML = `<tr><td colspan="7" class="py-6 text-center text-zinc-400">검색 조건에 맞는 상담 인입 내역이 없습니다.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" class="py-6 text-center text-zinc-400">검색 조건에 맞는 상담 인입 내역이 없습니다.</td></tr>`;
     return;
   }
 
@@ -6452,15 +6460,19 @@ function renderChannelDetailTable(chats) {
         ? '<span class="rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold text-orange-800">OUT</span>'
         : '<span class="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">IN</span>';
 
-    const dowName = DOW_NAMES[c.dow] || "";
+    const custName = getChatCustomerName(c);
+    const dateStr = c.date || (c.time ? c.time.slice(0, 10) : "–");
+    const dowName = (typeof DOW_NAMES !== "undefined" && DOW_NAMES[c.dow]) ? DOW_NAMES[c.dow] : "";
     const timeText = `${dowName.slice(0, 1)} ${c.hour || 14}시`;
 
     return `<tr class="hover:bg-zinc-50">
       <td class="py-2.5 px-2">${chBadge}</td>
       <td class="py-2.5 px-2">${dirBadge}</td>
-      <td class="py-2.5 px-2 tnum text-zinc-600">${timeText}</td>
+      <td class="py-2.5 px-2 tnum text-zinc-600 whitespace-nowrap">${dateStr}</td>
+      <td class="py-2.5 px-2 tnum text-zinc-500 whitespace-nowrap">${timeText}</td>
+      <td class="py-2.5 px-2 font-medium text-zinc-900 whitespace-nowrap">${custName}</td>
       <td class="py-2.5 px-2 font-medium text-zinc-700">${c.journey || "–"}</td>
-      <td class="py-2.5 px-3 text-zinc-600 font-medium truncate max-w-xs">${c.tag || "–"}</td>
+      <td class="py-2.5 px-3 text-zinc-600 font-medium truncate max-w-xs" title="${(c.tag || '–').replace(/"/g, '&quot;')}">${c.tag || "–"}</td>
       <td class="py-2.5 px-4 text-zinc-800 break-words max-w-xs">${(c.issue || "–").replace(/</g, "&lt;")}</td>
       <td class="py-2.5 px-4 text-zinc-600 break-words max-w-xs">${(c.act || "–").replace(/</g, "&lt;")}</td>
     </tr>`;
@@ -7659,6 +7671,33 @@ function renderClaimLeadtimeDetail() {
         maintainAspectRatio: false
       }
     });
+  }
+
+    // 6.5. 클레임 대분류별 통화 및 리드타임 비교 매트릭스 표 렌더링
+  const catTbody = document.getElementById("claimCategoryTableBody");
+  if (catTbody) {
+    const cats = res.summary.categoryBreakdown || [];
+    if (!cats.length) {
+      catTbody.innerHTML = `<tr><td colspan="7" class="py-6 text-center text-zinc-400 font-medium">분석된 클레임 유형 내역이 없습니다.</td></tr>`;
+    } else {
+      catTbody.innerHTML = cats.map((c) => {
+        const leadDaysStr = (c.avgLeadHours / 24).toFixed(1);
+        return `<tr class="hover:bg-zinc-50 transition cursor-pointer" onclick="setClaimCategoryFilter('${escapeHtml(c.category)}')">
+          <td class="py-2.5 px-3 font-semibold text-zinc-900 flex items-center justify-between">
+            <span>${escapeHtml(c.category)}</span>
+            <span class="text-[10px] font-normal text-teal-700 bg-teal-50 px-1.5 py-0.5 rounded ring-1 ring-teal-600/20">원장 필터 ➔</span>
+          </td>
+          <td class="py-2.5 px-2 text-right tnum font-semibold text-zinc-900">${c.total.toLocaleString()}건</td>
+          <td class="py-2.5 px-2 text-right tnum text-rose-700 font-medium">${c.repeats.toLocaleString()}건</td>
+          <td class="py-2.5 px-2 text-right tnum font-bold ${c.repeatRate >= 20 ? 'text-rose-600' : 'text-zinc-700'}">${c.repeatRate}%</td>
+          <td class="py-2.5 px-2 text-right tnum text-zinc-800 font-medium">${c.avgCalls}회</td>
+          <td class="py-2.5 px-2 text-right tnum font-semibold ${c.avgLeadHours >= 24 ? 'text-amber-700' : 'text-teal-800'}">
+            ${c.avgLeadHours}h <span class="text-[10px] text-zinc-500 font-normal">(${leadDaysStr}일)</span>
+          </td>
+          <td class="py-2.5 px-2 text-right tnum text-zinc-700 font-medium">${c.avgDurationMin}분</td>
+        </tr>`;
+      }).join("");
+    }
   }
 
   // 7. 하단 클레임 상세 원장 테이블
@@ -10559,3 +10598,21 @@ window.VOC_RENDER = {
   nextClaimPhotoModal
 };
 })();
+
+window.setClaimCategoryFilter = function(catName) {
+  let filterVal = "all";
+  if (catName.includes("품질")) filterVal = "품질";
+  else if (catName.includes("배송")) filterVal = "배송";
+  else if (catName.includes("휴먼에러")) filterVal = "휴먼에러";
+  else if (catName.includes("시스템")) filterVal = "시스템";
+  claimCategoryFilterVal = filterVal;
+  const select = document.getElementById("claimCategoryFilter");
+  if (select) select.value = filterVal;
+  claimPage = 1;
+  const period = E.getPeriod();
+  const res = E.analyzeClaimLeadtime(period, claimLeadtimeScope, claimWindowDays);
+  renderClaimTagMatrix(res.summary.tagBreakdown, res.claims);
+  renderClaimTable(res.claims);
+  const tblSection = document.getElementById("claimDetailTableBody");
+  if (tblSection) tblSection.scrollIntoView({ behavior: "smooth", block: "center" });
+};
