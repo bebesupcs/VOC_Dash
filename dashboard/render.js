@@ -5153,11 +5153,13 @@ function renderDelivery() {
             ctx.textAlign = "left";
             ctx.textBaseline = "middle";
             ctx.fillStyle = "#18181b";
-            ctx.fillText(` 총 ${tot.toLocaleString()}건 (${pct}%)`, rightX + 4, y);
+            const mainLabel = ` 총 ${tot.toLocaleString()}건 (${pct}%)`;
+            const mainWidth = ctx.measureText(mainLabel).width;
+            ctx.fillText(mainLabel, rightX + 6, y);
 
             ctx.font = "10px -apple-system, BlinkMacSystemFont, sans-serif";
             ctx.fillStyle = "#71717a";
-            ctx.fillText(` (CJ ${cold} / 풀필 ${ful})`, rightX + ctx.measureText(` 총 ${tot.toLocaleString()}건 (${pct}%)`).width + 4, y);
+            ctx.fillText(` (초저온 ${cold} / 풀필 ${ful})`, rightX + 6 + mainWidth + 4, y);
             ctx.restore();
           });
         }
@@ -5169,7 +5171,7 @@ function renderDelivery() {
           labels: typeLabels,
           datasets: [
             {
-              label: "초저온 (CJ)",
+              label: "초저온",
               data: coldData,
               backgroundColor: "#0284c7",
               hoverBackgroundColor: "#0369a1",
@@ -5189,7 +5191,7 @@ function renderDelivery() {
           responsive: true,
           maintainAspectRatio: false,
           layout: {
-            padding: { right: 140 }
+            padding: { right: 210 }
           },
           scales: {
             x: {
@@ -5197,7 +5199,7 @@ function renderDelivery() {
               grid: { color: "rgba(0,0,0,.05)" },
               ticks: { font: { size: 10 }, precision: 0 },
               beginAtZero: true,
-              grace: "15%"
+              grace: "25%"
             },
             y: {
               stacked: true,
@@ -7852,29 +7854,24 @@ function renderClaimLeadtimeDetail() {
 }
 
 function renderClaimProcessFlow(s) {
-  const container = document.getElementById("claimProcessFlowCards");
-  if (!container || !s) return;
+  if (!s) return;
 
-  const tot = s.totalClaims || 1;
-  const singleCount = s.callDist.count1;
-  const singlePct = s.fcrRate;
-  const recallCount = s.callDist.count2_3 + s.callDist.count4_plus;
-  const recallPct = s.repeatRate;
+  const elTot = document.getElementById("flowTotalClaims");
+  const elFcr = document.getElementById("flowFcrRate");
+  const elC1 = document.getElementById("flowCount1");
+  const elRep = document.getElementById("flowRepeatRate");
+  const elC23 = document.getElementById("flowCount23");
+  const elRisk = document.getElementById("flowRiskRate");
+  const elC4 = document.getElementById("flowCount4Plus");
 
-  const longCount = s.leadDist.days4_7 + s.leadDist.gt7Days;
-  const longPct = (((s.leadDist.days4_7 + s.leadDist.gt7Days) / tot) * 100).toFixed(1);
-
-  document.getElementById("step1Count").textContent = `${tot.toLocaleString()}건`;
-  document.getElementById("step1Sub").textContent = "인입 채널 100% 집계";
-
-  document.getElementById("step2Count").textContent = `${singleCount.toLocaleString()}건 (${singlePct}%)`;
-  document.getElementById("step2Sub").textContent = `재통화 분기 ${recallCount.toLocaleString()}건 (${recallPct}%)`;
-
-  document.getElementById("step3Count").textContent = `${longCount.toLocaleString()}건 (${longPct}%)`;
-  document.getElementById("step3Sub").textContent = "성분/공장 검수 이관 병목";
-
-  document.getElementById("step4Count").textContent = `평균 ${s.avgLeadTimeHours}h (${s.avgLeadTimeDays}일)`;
-  document.getElementById("step4Sub").textContent = `총 통화 ${s.avgCalls}회 · ${s.avgDurationMin}분`;
+  if (elTot) elTot.textContent = `${(s.totalClaims || 0).toLocaleString()}건`;
+  if (elFcr) elFcr.textContent = `FCR ${s.fcrRate}%`;
+  if (elC1) elC1.textContent = `${(s.callDist?.count1 || 0).toLocaleString()}건 (${s.fcrRate}%)`;
+  if (elRep) elRep.textContent = `재통화 ${s.repeatRate}%`;
+  if (elC23) elC23.textContent = `${(s.callDist?.count2_3 || 0).toLocaleString()}건`;
+  const riskRate = s.totalClaims > 0 ? (((s.callDist?.count4_plus || 0) / s.totalClaims) * 100).toFixed(1) : "0.0";
+  if (elRisk) elRisk.textContent = `위험 ${riskRate}%`;
+  if (elC4) elC4.textContent = `${(s.callDist?.count4_plus || 0).toLocaleString()}건 (${riskRate}%)`;
 }
 
 function renderClaimTagMatrix(tagBreakdown, claims) {
