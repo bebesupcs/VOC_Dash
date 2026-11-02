@@ -47,34 +47,34 @@
 
 
 <style>
-
-
-
   :root { font-family: Inter, system-ui, sans-serif; }
-
-
-
   .tnum { font-variant-numeric: tabular-nums; }
-
-
-
   canvas { max-height: 260px; }
-
-
-
   .view-tab { color: #52525b; border-radius: 0.5rem; text-decoration: none; }
-
-
-
   .view-tab:hover { background-color: #f4f4f5; color: #18181b; }
-
-
-
   .view-tab[aria-selected="true"] { background-color: #0f766e !important; color: #ffffff !important; font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
 
+  /* 모바일 및 태블릿 반응형 최적화 스타일 */
+  html, body {
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+  .overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
+  }
+  /* 모바일 테이블 줄바꿈 찌그러짐 방지: 셀 너비 유지 및 매끄러운 터치 스크롤 */
+  .overflow-x-auto table:not(.wrap-table) th,
+  .overflow-x-auto table:not(.wrap-table) td {
+    white-space: nowrap;
+  }
+  .overflow-x-auto table td.wrap-cell,
+  .overflow-x-auto table td.whitespace-normal {
+    white-space: normal !important;
+  }
+  section:empty {
+    display: none !important;
+  }
 
-
-  
 
 
 
@@ -638,19 +638,13 @@
 
 
 
-<div id="dashboardApp" class="min-h-screen lg:flex" style="display: none;">
+<div id="dashboardApp" class="min-h-screen flex flex-col lg:flex-row w-full max-w-full overflow-x-hidden" style="display: none;">
 
+  <!-- 모바일 사이드바 배경 (Backdrop) -->
+  <div id="sidebarBackdrop" class="fixed inset-0 bg-black/50 backdrop-blur-xs z-40 lg:hidden hidden transition-opacity"></div>
 
-
-
-
-
-
-  <!-- 좌측 사이드바: 1~6번 카테고리 및 기간 설정 (Item 8) -->
-
-
-
-  <aside id="appSidebar" class="w-full lg:w-64 shrink-0 border-b lg:border-b-0 lg:border-r border-black/10 bg-white p-4 lg:p-5 flex flex-col justify-between lg:h-screen lg:sticky lg:top-0">
+  <!-- 좌측 사이드바: 1~6번 카테고리 및 기간 설정 (모바일/태블릿: 슬라이드 드로어) -->
+  <aside id="appSidebar" class="fixed inset-y-0 left-0 z-50 w-72 sm:w-80 bg-white shadow-2xl transition-transform duration-300 ease-in-out -translate-x-full lg:translate-x-0 lg:static lg:w-64 shrink-0 border-r border-black/10 p-4 lg:p-5 flex flex-col justify-between h-full lg:h-screen lg:sticky lg:top-0 lg:shadow-none overflow-y-auto">
 
 
 
@@ -687,13 +681,10 @@
 
 
           <p class="text-[11px] text-zinc-400 mt-1">CX 옴니채널 통합 분석 대시보드</p>
-
-
-
         </div>
-
-
-
+        <button id="closeSidebarBtn" type="button" class="lg:hidden p-1.5 -mr-1 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-lg cursor-pointer transition" aria-label="메뉴 닫기">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
       </div>
 
 
@@ -1052,17 +1043,29 @@
 
   </aside>
 
-
-
-
-
-
+  <!-- 모바일 / 태블릿 전용 상단 네비게이션 헤더 (lg 미만 화면에서만 노출) -->
+  <header class="lg:hidden sticky top-0 z-30 flex items-center justify-between bg-white/95 backdrop-blur-md px-3.5 py-2.5 border-b border-black/10 shrink-0 shadow-2xs">
+    <div class="flex items-center gap-2">
+      <button id="openSidebarBtn" type="button" class="p-2 -ml-1 rounded-xl text-zinc-700 hover:bg-zinc-100 active:bg-zinc-200 transition cursor-pointer" aria-label="전체 메뉴 열기">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+        </svg>
+      </button>
+      <div class="flex items-center gap-1.5">
+        <span class="flex h-6 w-6 items-center justify-center rounded-lg bg-teal-600 text-white font-bold text-xs shadow-xs">B</span>
+        <span class="text-sm font-bold text-zinc-900 tracking-tight">베베숲 VOC</span>
+      </div>
+    </div>
+    <div class="flex items-center gap-1.5">
+      <span id="mobileActiveTabBadge" class="text-xs font-semibold px-2.5 py-0.5 rounded-md bg-teal-50 text-teal-800 border border-teal-200/60 shadow-2xs">종합 대시보드</span>
+      <button id="mobileShareBtn" type="button" class="p-1.5 rounded-lg text-sky-700 hover:bg-sky-50 transition cursor-pointer" title="공유 주소">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"></path></svg>
+      </button>
+    </div>
+  </header>
 
   <!-- 우측 메인 콘텐츠 영역 -->
-
-
-
-  <main class="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 overflow-y-auto">
+  <main class="flex-1 min-w-0 p-3 sm:p-6 lg:p-8 overflow-y-auto max-w-full">
 
 
 

@@ -150,15 +150,15 @@ function kpiCard(label, value, deltaPct, opts = {}) {
       ? `<div class="mt-1 text-[11px] text-zinc-400 font-normal truncate whitespace-nowrap">${opts.subText}</div>`
       : "";
 
-  return `<div class="bg-white p-3.5 h-full flex flex-col justify-between">
-    <div>
-      <div class="flex items-center text-xs text-zinc-500">
+  return `<div class="bg-white p-3 sm:p-3.5 h-full flex flex-col justify-between min-w-0">
+    <div class="min-w-0">
+      <div class="flex items-center text-[11px] sm:text-xs text-zinc-500 min-w-0">
         <span class="truncate whitespace-nowrap">${label}</span>
         ${alert}
         ${tooltipEl}
       </div>
-      <div class="mt-1 flex items-baseline gap-2">
-        <span class="tnum text-2xl font-semibold tracking-tight whitespace-nowrap">${value}</span>
+      <div class="mt-1 flex items-baseline gap-1.5 sm:gap-2 flex-wrap sm:flex-nowrap">
+        <span class="tnum text-lg sm:text-2xl font-semibold tracking-tight whitespace-nowrap">${value}</span>
         ${badge}
       </div>
     </div>
@@ -9782,6 +9782,32 @@ function exportCompCSV() {
   exportCompPeriodSummaryExcel();
 }
 
+function openMobileSidebar() {
+  const sidebar = document.getElementById("appSidebar");
+  const backdrop = document.getElementById("sidebarBackdrop");
+  if (sidebar) {
+    sidebar.classList.remove("-translate-x-full");
+    sidebar.classList.add("translate-x-0");
+  }
+  if (backdrop) {
+    backdrop.classList.remove("hidden");
+  }
+  document.body.classList.add("overflow-hidden", "lg:overflow-auto");
+}
+
+function closeMobileSidebar() {
+  const sidebar = document.getElementById("appSidebar");
+  const backdrop = document.getElementById("sidebarBackdrop");
+  if (sidebar) {
+    sidebar.classList.add("-translate-x-full");
+    sidebar.classList.remove("translate-x-0");
+  }
+  if (backdrop) {
+    backdrop.classList.add("hidden");
+  }
+  document.body.classList.remove("overflow-hidden", "lg:overflow-auto");
+}
+
 function switchView(view) {
   currentView = view;
   const viewIds = ["dashboardView", "qualityView", "deliveryView", "serviceView", "channelView", "compensationView", "reportView"];
@@ -9794,6 +9820,25 @@ function switchView(view) {
   if (activeEl) activeEl.hidden = false;
 
   document.querySelectorAll(".view-tab").forEach((t) => t.setAttribute("aria-selected", String(t.dataset.view === view)));
+
+  // 모바일 상단 탭 뱃지 텍스트 갱신 및 드로어 자동 닫기
+  const viewTitles = {
+    dashboard: "종합 대시보드",
+    quality: "품질 클레임",
+    delivery: "배송 클레임",
+    service: "서비스 클레임",
+    channel: "상담/채널 상세",
+    compensation: "품질보상 리스트",
+    report: "리포트 추출"
+  };
+  const mobileActiveTabBadge = document.getElementById("mobileActiveTabBadge");
+  if (mobileActiveTabBadge && viewTitles[view]) {
+    mobileActiveTabBadge.textContent = viewTitles[view];
+  }
+  closeMobileSidebar();
+  const mainEl = document.querySelector("main");
+  if (mainEl) mainEl.scrollTop = 0;
+  window.scrollTo({ top: 0, behavior: "smooth" });
 
   if (view === "dashboard") renderAll();
   else if (view === "quality") renderQuality();
@@ -9859,6 +9904,22 @@ function init() {
   fillFilters();
   bindRepeatToggle();
   document.querySelectorAll(".view-tab").forEach((t) => t.addEventListener("click", () => switchView(t.dataset.view)));
+
+  // 모바일 사이드바 드로어 이벤트 바인딩
+  const openSidebarBtn = document.getElementById("openSidebarBtn");
+  if (openSidebarBtn) openSidebarBtn.addEventListener("click", openMobileSidebar);
+  const closeSidebarBtn = document.getElementById("closeSidebarBtn");
+  if (closeSidebarBtn) closeSidebarBtn.addEventListener("click", closeMobileSidebar);
+  const sidebarBackdrop = document.getElementById("sidebarBackdrop");
+  if (sidebarBackdrop) sidebarBackdrop.addEventListener("click", closeMobileSidebar);
+  const mobileShareBtn = document.getElementById("mobileShareBtn");
+  if (mobileShareBtn) {
+    mobileShareBtn.addEventListener("click", () => {
+      const shareBtn = document.getElementById("btnShareServer");
+      if (shareBtn) shareBtn.click();
+    });
+  }
+
   const repPrintBtn = document.getElementById("reportPrint");
   if (repPrintBtn) repPrintBtn.addEventListener("click", () => window.print());
   const repExcelBtn = document.getElementById("reportExportExcel");
