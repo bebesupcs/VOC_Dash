@@ -40,6 +40,12 @@ PORT = 8080
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DIRECTORY = str(PROJECT_ROOT / "dashboard")
 
+try:
+    import employee_auth
+except ImportError:
+    sys.path.append(str(Path(__file__).resolve().parent))
+    import employee_auth
+
 if os.name == "nt":
     CLOUDFLARED_BIN = PROJECT_ROOT / "tools" / "cloudflared.exe"
 else:
@@ -133,6 +139,12 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             }
             self.wfile.write(json.dumps(info, ensure_ascii=False).encode("utf-8"))
             return
+        elif clean_path == "/api/audit_logs":
+            self.handle_get_audit_logs()
+            return
+        elif clean_path == "/api/employees":
+            self.handle_get_employees()
+            return
         # 정적 파일(.js, .json, .html, .css) 초고속 GZIP 압축 스트리밍 (54MB -> 5.8MB, 외부 접속 10배 가속)
         accept_encoding = self.headers.get("Accept-Encoding", "")
         if "gzip" in accept_encoding:
@@ -210,12 +222,51 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             target_period = body_data.get("period")
             memos = body_data.get("memos", [])
             insights = body_data.get("insights", {})
-            self.handle_export_excel(target_period, memos=memos, insights=insights)
+            user_info = body_data.get("user")
+            self.handle_export_excel(target_period, memos=memos, insights=insights, user_info=user_info)
+            return
+        elif clean_path == "/api/audit_log":
+            content_length = int(self.headers.get("Content-Length", 0))
+            body_bytes = self.rfile.read(content_length) if content_length > 0 else b""
+            body_data = {}
+            if body_bytes:
+                try:
+                    body_data = json.loads(body_bytes.decode("utf-8"))
+                except Exception:
+                    pass
+            self.handle_record_audit_log(body_data)
+            return
+        elif clean_path == "/api/sync_employees":
+            self.handle_sync_employees()
+            return
+        elif clean_path == "/api/restart_server":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": True, "message": "Server restarting..."}, ensure_ascii=False).encode("utf-8"))
+            threading.Timer(1.0, lambda: os._exit(0)).start()
             return
         self.send_error(404, "Not Found")
 
-    def handle_export_excel(self, target_period, memos=None, insights=None):
+    def handle_export_excel(self, target_period, memos=None, insights=None, user_info=None):
         from urllib.parse import quote
+        try:
+            client_ip = self.get_client_ip()
+            user_agent = self.headers.get("User-Agent", "")[:100]
+            u = user_info or {}
+            employee_auth.record_audit_log({
+                "action": "EXCEL_DOWNLOAD",
+                "username": u.get("username", "anonymous"),
+                "name": u.get("name", ""),
+                "dept": u.get("dept", ""),
+                "role": u.get("role", "user"),
+                "target": f"VOC 분석종합리포트 엑셀_{target_period or 'latest'}",
+                "ip": client_ip,
+                "user_agent": user_agent
+            }, PROJECT_ROOT)
+        except Exception:
+            pass
+
         try:
             sys.path.append(str(Path(__file__).resolve().parent))
             import importlib
@@ -339,49 +390,65 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False).encode("utf-8"))
 
+    def get_client_ip(self):
+        xff = self.headers.get("X-Forwarded-For")
+        if xff:
+            return xff.split(",")[0].strip()
+        return self.client_address[0] if self.client_address else "unknown"
+
     def handle_login(self, body_data):
         username = (body_data.get("username") or "").strip()
         password = (body_data.get("password") or "").strip()
 
-        auth_file = PROJECT_ROOT / "config" / "auth_config.json"
-        accounts = []
-        if auth_file.exists():
-            try:
-                with open(auth_file, "r", encoding="utf-8") as f:
-                    auth_cfg = json.load(f)
-                    accounts = auth_cfg.get("accounts", [])
-            except Exception:
-                pass
-
-        if not accounts:
-            accounts = [
-                {"username": "cx", "password": "bebesup1!", "role": "admin", "name": "CX팀 관리자"},
-                {"username": "bebesup", "password": "bebesup1!", "role": "user", "name": "CX팀 사원"}
-            ]
-
-        matched = None
-        for acc in accounts:
-            if acc.get("username") == username and acc.get("password") == password:
-                matched = acc
-                break
+        result = employee_auth.authenticate(username, password, PROJECT_ROOT)
+        if result.get("success"):
+            client_ip = self.get_client_ip()
+            user_agent = self.headers.get("User-Agent", "")[:100]
+            employee_auth.record_audit_log({
+                "action": "LOGIN",
+                "username": result.get("username"),
+                "name": result.get("name"),
+                "dept": result.get("dept"),
+                "role": result.get("role"),
+                "target": "대시보드 로그인",
+                "ip": client_ip,
+                "user_agent": user_agent
+            }, PROJECT_ROOT)
 
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.end_headers()
+        self.wfile.write(json.dumps(result, ensure_ascii=False).encode("utf-8"))
 
-        if matched:
-            resp = {
-                "success": True,
-                "role": matched.get("role", "user"),
-                "username": matched.get("username"),
-                "name": matched.get("name", "CX팀")
-            }
-        else:
-            resp = {
-                "success": False,
-                "error": "아이디 또는 비밀번호가 올바르지 않습니다."
-            }
-        self.wfile.write(json.dumps(resp, ensure_ascii=False).encode("utf-8"))
+    def handle_record_audit_log(self, body_data):
+        body_data["ip"] = self.get_client_ip()
+        body_data["user_agent"] = self.headers.get("User-Agent", "")[:100]
+        record = employee_auth.record_audit_log(body_data, PROJECT_ROOT)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(json.dumps({"ok": True, "record": record}, ensure_ascii=False).encode("utf-8"))
+
+    def handle_get_audit_logs(self):
+        logs = employee_auth.get_recent_audit_logs(PROJECT_ROOT, limit=200)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(json.dumps({"ok": True, "logs": logs}, ensure_ascii=False).encode("utf-8"))
+
+    def handle_get_employees(self):
+        data = employee_auth.load_all_accounts(PROJECT_ROOT)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(json.dumps({"ok": True, "employees": data.get("employees", [])}, ensure_ascii=False).encode("utf-8"))
+
+    def handle_sync_employees(self):
+        emps = employee_auth.fetch_and_cache_employees(PROJECT_ROOT)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(json.dumps({"ok": True, "count": len(emps)}, ensure_ascii=False).encode("utf-8"))
 
     def log_message(self, format, *args):
         # 표준 로깅

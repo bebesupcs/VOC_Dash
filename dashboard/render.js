@@ -2297,8 +2297,9 @@ function renderReport() {
 }
 
 async function exportReportExcel() {
-  if (typeof window.isUserAdmin === "function" && !window.isUserAdmin()) {
-    alert("리포트 엑셀 다운로드는 관리자(cx) 계정만 가능합니다.");
+  const curAuth = typeof window.getCurrentUser === "function" ? window.getCurrentUser() : null;
+  if (!curAuth || !curAuth.username) {
+    alert("리포트 엑셀 다운로드는 사내 계정 로그인 후 가능합니다.");
     return;
   }
 
@@ -2379,8 +2380,12 @@ async function exportReportExcel() {
     const payload = {
       period: period.key,
       memos: memoList,
-      insights: curInsights
+      insights: curInsights,
+      user: curAuth
     };
+    if (typeof window.logAuditAction === "function") {
+      window.logAuditAction("EXCEL_DOWNLOAD", `VOC 분석종합리포트 엑셀 (${periodDisp})`, "주간/월간 종합 리포트 엑셀 다운로드");
+    }
 
     let res;
     try {
@@ -9192,6 +9197,9 @@ async function exportCompPeriodSummaryExcel() {
   const periodName = formatPeriodDisplayLabel(period, E.state.mode);
   const dateRange = period.label;
   const targetChats = E.rawChats(period).filter(isCompChat);
+  if (typeof window.logAuditAction === "function") {
+    window.logAuditAction("EXCEL_DOWNLOAD", `품질보상내역서 엑셀 (${periodName})`, `${targetChats.length}건 보상 제품별 집계 다운로드`);
+  }
 
   const famCounts = {};
   targetChats.forEach((c) => {
@@ -9456,6 +9464,9 @@ async function exportCompPeriodSummaryExcel() {
 async function exportCompFullMatrixExcel() {
   const period = E.getPeriod();
   if (!period) return;
+  if (typeof window.logAuditAction === "function") {
+    window.logAuditAction("EXCEL_DOWNLOAD", "품질보상 연간 풀 매트릭스 원장 엑셀", "전수 보상 상세 내역 엑셀 다운로드");
+  }
   const list = E.getPeriodList();
   const year = period.key.slice(0, 4);
   const bucketList = getCompBucketList(period, year);
@@ -9850,6 +9861,9 @@ function switchView(view) {
 }
 
 function exportCSV() {
+  if (typeof window.logAuditAction === "function") {
+    window.logAuditAction("EXCEL_DOWNLOAD", `VOC 집계 CSV (${E.getPeriod().key})`, "CSV 태그별 집계 파일 다운로드");
+  }
   const chats = window._curChats || [];
   const agg = {};
   for (const c of chats) {
@@ -10781,7 +10795,7 @@ function init() {
 
 
   // ==========================================
-  // 사내 인증 및 권한 제어 시스템 (관리자/사원)
+  // 사내 인증 및 보안 감사 로그 시스템 (구글 시트 연동)
   // ==========================================
   window.getCurrentUser = function() {
     try {
@@ -10794,6 +10808,25 @@ function init() {
   window.isUserAdmin = function() {
     const u = window.getCurrentUser();
     return u && u.role === "admin";
+  };
+
+  window.logAuditAction = function(action, target, detail = "") {
+    try {
+      const user = window.getCurrentUser() || {};
+      fetch("/api/audit_log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          target,
+          detail,
+          username: user.username || "anonymous",
+          name: user.name || "",
+          dept: user.dept || "",
+          role: user.role || "user"
+        })
+      }).catch(() => {});
+    } catch (e) {}
   };
 
   function applyUserRolePermissions(authData) {
@@ -10810,19 +10843,20 @@ function init() {
       if (isLogged) {
         userInfoBar.classList.remove("hidden");
         if (roleIcon) roleIcon.textContent = isAdmin ? "👑" : "👤";
-        if (userName) userName.textContent = authData.name || (isAdmin ? "CX팀 관리자" : "CX팀 사원");
+        const deptPrefix = authData.dept ? `${authData.dept} · ` : "";
+        if (userName) userName.textContent = `${deptPrefix}${authData.name || (isAdmin ? "CX팀 관리자" : "사내 임직원")}`;
         if (userBadge) {
-          userBadge.textContent = isAdmin ? "관리자" : "사원";
+          userBadge.textContent = isAdmin ? "관리자" : (authData.dept || "사원");
           userBadge.className = isAdmin
             ? "rounded bg-teal-600 px-1.5 py-0.2 text-[9.5px] font-bold text-white shadow-2xs"
-            : "rounded bg-zinc-200 px-1.5 py-0.2 text-[9.5px] font-bold text-zinc-700";
+            : "rounded bg-indigo-100 text-indigo-800 px-1.5 py-0.2 text-[9.5px] font-bold shadow-2xs";
         }
       } else {
         userInfoBar.classList.add("hidden");
       }
     }
 
-    // 1. 데이터 최신화 버튼 권한
+    // 1. 데이터 최신화 버튼 권한 (CX팀 관리자 전용)
     const btnSync = document.getElementById("btnFastSync");
     if (btnSync) {
       if (isAdmin) {
@@ -10831,12 +10865,12 @@ function init() {
         btnSync.removeAttribute("data-auth-disabled");
       } else {
         btnSync.classList.add("opacity-40", "cursor-not-allowed");
-        btnSync.title = "데이터 최신화는 관리자(cx) 계정만 실행할 수 있습니다.";
+        btnSync.title = "데이터 최신화는 관리자(CX팀) 계정만 실행할 수 있습니다.";
         btnSync.setAttribute("data-auth-disabled", "true");
       }
     }
 
-    // 2. 보상내역 수기 추가 버튼 권한
+    // 2. 보상내역 수기 추가 버튼 권한 (CX팀 관리자 전용)
     const btnCompManual = document.getElementById("compAddManualBtn");
     if (btnCompManual) {
       if (isAdmin) {
@@ -10846,7 +10880,7 @@ function init() {
       }
     }
 
-    // 3. 엑셀 다운로드 권한 제어 (리포트 엑셀 추출, 품질보상 리스트 엑셀)
+    // 3. 엑셀 다운로드 권한: 사내 인증된 모든 임직원 가능 (단, 다운로드 흔적이 감사 로그에 영구 기록됨)
     const excelBtns = [
       document.getElementById("reportExportExcel"),
       document.getElementById("compExportPeriodBtn"),
@@ -10855,18 +10889,19 @@ function init() {
     ];
     excelBtns.forEach(btn => {
       if (btn) {
-        if (isAdmin) {
+        if (isLogged) {
           btn.classList.remove("opacity-40", "cursor-not-allowed");
           btn.removeAttribute("data-auth-disabled");
+          btn.title = "엑셀 추출 실행 (다운로드 이력이 보안 감사 로그에 기록됩니다)";
         } else {
           btn.classList.add("opacity-40", "cursor-not-allowed");
-          btn.title = "엑셀 다운로드는 관리자(cx) 계정만 가능합니다.";
+          btn.title = "엑셀 다운로드는 사내 계정 로그인 후 가능합니다.";
           btn.setAttribute("data-auth-disabled", "true");
         }
       }
     });
 
-    // 4. 리포트 메모/인사이트 편집 권한
+    // 4. 리포트 메모/인사이트 편집 권한 (관리자 전용)
     document.querySelectorAll(".report-memo-area, .report-insight-area").forEach(textarea => {
       if (isAdmin) {
         textarea.removeAttribute("readonly");
@@ -10874,9 +10909,19 @@ function init() {
       } else {
         textarea.setAttribute("readonly", "true");
         textarea.classList.add("bg-zinc-50/70", "cursor-not-allowed");
-        textarea.title = "메모 및 인사이트 편집은 관리자(cx) 계정만 가능합니다.";
+        textarea.title = "메모 및 인사이트 편집은 관리자(CX팀) 계정만 가능합니다.";
       }
     });
+
+    // 5. 관리자 전용: 보안 감사 로그 모달 버튼 노출
+    const btnAudit = document.getElementById("btnAuditLogModal");
+    if (btnAudit) {
+      if (isAdmin) {
+        btnAudit.classList.remove("hidden");
+      } else {
+        btnAudit.classList.add("hidden");
+      }
+    }
   }
 
   let isDashboardInitialized = false;
@@ -10919,8 +10964,8 @@ function init() {
     }
 
     let currentAuth = window.getCurrentUser();
-    // 과거 구 계정(admin 등) 세션 자동 만료 처리
-    if (currentAuth && (!["cx", "bebesup"].includes(currentAuth.username))) {
+    // 과거 구 계정(단순 admin 등) 세션 정리
+    if (currentAuth && currentAuth.username === "admin") {
       localStorage.removeItem("voc_auth_user");
       sessionStorage.removeItem("voc_auth_user");
       currentAuth = null;
@@ -10952,10 +10997,12 @@ function init() {
           }
         } catch (err) {
           // 오프라인/정적 파일 열람 시 기본 계정 폴백
-          if (username === "cx" && password === "bebesup1!") {
-            authResult = { success: true, role: "admin", username: "cx", name: "CX팀 관리자" };
+          if (username.startsWith("hshwang") && password === "bebesup1!") {
+            authResult = { success: true, role: "admin", username: "hshwang@bebesup.co.kr", name: "황현수 팀장", dept: "CX팀" };
+          } else if (username === "cx" && password === "bebesup1!") {
+            authResult = { success: true, role: "admin", username: "cx", name: "CX팀 관리자", dept: "CX팀" };
           } else if (username === "bebesup" && password === "bebesup1!") {
-            authResult = { success: true, role: "user", username: "bebesup", name: "CX팀 사원" };
+            authResult = { success: true, role: "user", username: "bebesup", name: "CX팀 사원", dept: "CX팀" };
           }
         }
 
@@ -10967,7 +11014,7 @@ function init() {
           showToast(`✨ 반갑습니다, ${authResult.name}님! 로그인되었습니다.`);
         } else {
           if (errorEl) {
-            const msg = (authResult && authResult.error) ? authResult.error : "아이디 또는 비밀번호가 올바르지 않습니다.";
+            const msg = (authResult && authResult.error) ? authResult.error : "아이디 또는 비밀번호가 올바르지 않습니다. (등록된 회사 이메일을 확인해주세요)";
             if (errorText) errorText.textContent = msg;
             else errorEl.textContent = msg;
             errorEl.classList.remove("hidden");
@@ -10979,6 +11026,7 @@ function init() {
     if (logoutBtn) {
       logoutBtn.addEventListener("click", () => {
         if (confirm("로그아웃 하시겠습니까?")) {
+          window.logAuditAction("LOGOUT", "대시보드 로그아웃");
           localStorage.removeItem("voc_auth_user");
           sessionStorage.removeItem("voc_auth_user");
           const userInfoBar = document.getElementById("authUserInfoBar");
@@ -10998,8 +11046,136 @@ function init() {
         if (btnSync.getAttribute("data-auth-disabled") === "true") {
           e.stopImmediatePropagation();
           alert("데이터 최신화는 관리자(admin) 계정으로 로그인해야 실행할 수 있습니다.");
+        } else {
+          window.logAuditAction("FAST_SYNC", "데이터 원클릭 최신화", "채널톡/게시판/배송 DB 최신 데이터 패치");
         }
       }, true);
+    }
+
+    // ==========================================
+    // 사내 보안 감사 로그 모달 핸들러
+    // ==========================================
+    const btnAuditLogModal = document.getElementById("btnAuditLogModal");
+    const auditLogModal = document.getElementById("auditLogModal");
+    const closeAuditLogModalBtn = document.getElementById("closeAuditLogModalBtn");
+    const closeAuditLogModalBtn2 = document.getElementById("closeAuditLogModalBtn2");
+    const btnRefreshAuditLogs = document.getElementById("btnRefreshAuditLogs");
+    const btnSyncEmployeesModal = document.getElementById("btnSyncEmployeesModal");
+    const auditSearchInput = document.getElementById("auditSearchInput");
+    const auditLogTableBody = document.getElementById("auditLogTableBody");
+    const auditLogCountBadge = document.getElementById("auditLogCountBadge");
+
+    let cachedAuditLogs = [];
+
+    function renderAuditLogsTable(logs) {
+      if (!auditLogTableBody) return;
+      const filterText = (auditSearchInput ? auditSearchInput.value : "").trim().toLowerCase();
+      const filtered = filterText
+        ? logs.filter(l => 
+            (l.username && l.username.toLowerCase().includes(filterText)) ||
+            (l.name && l.name.toLowerCase().includes(filterText)) ||
+            (l.dept && l.dept.toLowerCase().includes(filterText)) ||
+            (l.action && l.action.toLowerCase().includes(filterText)) ||
+            (l.target && l.target.toLowerCase().includes(filterText)) ||
+            (l.ip && l.ip.includes(filterText))
+          )
+        : logs;
+
+      if (auditLogCountBadge) {
+        auditLogCountBadge.textContent = `총 ${filtered.length}건 기록`;
+      }
+
+      if (!filtered.length) {
+        auditLogTableBody.innerHTML = `<tr><td colspan="5" class="py-8 text-center text-zinc-400">기록된 감사 로그가 없습니다.</td></tr>`;
+        return;
+      }
+
+      auditLogTableBody.innerHTML = filtered.map(log => {
+        let actionBadge = `<span class="rounded bg-zinc-100 text-zinc-700 px-2 py-0.5 text-[10px] font-semibold">${log.action}</span>`;
+        if (log.action === "EXCEL_DOWNLOAD" || log.action === "REPORT_EXPORT") {
+          actionBadge = `<span class="rounded bg-emerald-100 text-emerald-800 px-2 py-0.5 text-[10px] font-bold">📥 엑셀다운</span>`;
+        } else if (log.action === "LOGIN") {
+          actionBadge = `<span class="rounded bg-sky-100 text-sky-800 px-2 py-0.5 text-[10px] font-bold">🔑 로그인</span>`;
+        } else if (log.action === "LOGOUT") {
+          actionBadge = `<span class="rounded bg-zinc-100 text-zinc-600 px-2 py-0.5 text-[10px] font-medium">🚪 로그아웃</span>`;
+        } else if (log.action === "FAST_SYNC") {
+          actionBadge = `<span class="rounded bg-purple-100 text-purple-800 px-2 py-0.5 text-[10px] font-bold">⚡ DB동기화</span>`;
+        }
+
+        const deptStr = log.dept ? `<span class="text-zinc-500 font-semibold text-[11px]">[${log.dept}]</span>` : "";
+        const userStr = `<span class="font-bold text-zinc-900">${escapeHtml(log.name || log.username)}</span> ${deptStr}`;
+        const emailStr = log.username ? `<div class="text-[10px] text-zinc-400 font-mono">${escapeHtml(log.username)}</div>` : "";
+
+        return `<tr class="hover:bg-zinc-50/80 transition">
+          <td class="py-2.5 px-3 text-zinc-500 font-mono text-[11px] whitespace-nowrap">${escapeHtml(log.timestamp || "-")}</td>
+          <td class="py-2.5 px-3 whitespace-nowrap">${userStr}${emailStr}</td>
+          <td class="py-2.5 px-3 whitespace-nowrap">${actionBadge}</td>
+          <td class="py-2.5 px-3 font-medium text-zinc-800">${escapeHtml(log.target || log.detail || "-")}</td>
+          <td class="py-2.5 px-3 text-zinc-500 font-mono text-[11px] whitespace-nowrap">${escapeHtml(log.ip || "-")}</td>
+        </tr>`;
+      }).join("");
+    }
+
+    async function fetchAndRenderAuditLogs() {
+      if (!auditLogTableBody) return;
+      auditLogTableBody.innerHTML = `<tr><td colspan="5" class="py-8 text-center text-zinc-400">감사 로그를 조회하는 중입니다...</td></tr>`;
+      try {
+        const res = await fetch("/api/audit_logs");
+        if (res.ok) {
+          const data = await res.json();
+          cachedAuditLogs = data.logs || [];
+          renderAuditLogsTable(cachedAuditLogs);
+        } else {
+          auditLogTableBody.innerHTML = `<tr><td colspan="5" class="py-8 text-center text-rose-500">감사 로그를 불러오지 못했습니다.</td></tr>`;
+        }
+      } catch (e) {
+        auditLogTableBody.innerHTML = `<tr><td colspan="5" class="py-8 text-center text-rose-500">서버 연결 오류</td></tr>`;
+      }
+    }
+
+    if (btnAuditLogModal && auditLogModal) {
+      btnAuditLogModal.addEventListener("click", () => {
+        auditLogModal.classList.remove("hidden");
+        if (auditSearchInput) auditSearchInput.value = "";
+        fetchAndRenderAuditLogs();
+      });
+
+      const hideAuditModal = () => auditLogModal.classList.add("hidden");
+      if (closeAuditLogModalBtn) closeAuditLogModalBtn.addEventListener("click", hideAuditModal);
+      if (closeAuditLogModalBtn2) closeAuditLogModalBtn2.addEventListener("click", hideAuditModal);
+      auditLogModal.addEventListener("click", (e) => {
+        if (e.target === auditLogModal) hideAuditModal();
+      });
+
+      if (btnRefreshAuditLogs) {
+        btnRefreshAuditLogs.addEventListener("click", fetchAndRenderAuditLogs);
+      }
+
+      if (auditSearchInput) {
+        auditSearchInput.addEventListener("input", () => renderAuditLogsTable(cachedAuditLogs));
+      }
+
+      if (btnSyncEmployeesModal) {
+        btnSyncEmployeesModal.addEventListener("click", async () => {
+          const origText = btnSyncEmployeesModal.innerHTML;
+          btnSyncEmployeesModal.innerHTML = `<span>⏳ 동기화 중...</span>`;
+          btnSyncEmployeesModal.disabled = true;
+          try {
+            const res = await fetch("/api/sync_employees", { method: "POST" });
+            if (res.ok) {
+              const data = await res.json();
+              showToast(`✅ 사내 구글 시트 임직원 명부 ${data.count || 39}명이 최신화되었습니다.`);
+            } else {
+              showToast("⚠️ 임직원 명부 동기화 실패 (네트워크 확인 필요)");
+            }
+          } catch (e) {
+            showToast("⚠️ 임직원 명부 동기화 오류");
+          } finally {
+            btnSyncEmployeesModal.innerHTML = origText;
+            btnSyncEmployeesModal.disabled = false;
+          }
+        });
+      }
     }
   }
 

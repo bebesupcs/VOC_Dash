@@ -1,0 +1,317 @@
+{
+  "employees": [
+    {
+      "username": "jwpark@bebesup.co.kr",
+      "id": "jwpark",
+      "name": "박진우 대표",
+      "dept": "경영진",
+      "phone": "02-562-8183",
+      "role": "user"
+    },
+    {
+      "username": "jhhwang@bebesup.co.kr",
+      "id": "jhhwang",
+      "name": "황준하 총괄이사",
+      "dept": "경영진",
+      "phone": "02-562-8620",
+      "role": "user"
+    },
+    {
+      "username": "mkt@bebesup.co.kr",
+      "id": "mkt",
+      "name": "이승철 본부장",
+      "dept": "경영진",
+      "phone": "02-562-8186",
+      "role": "user"
+    },
+    {
+      "username": "jhlee@bebesup.co.kr",
+      "id": "jhlee",
+      "name": "이주훈 실장",
+      "dept": "경영진 / 사업기획실",
+      "phone": "02-6325-8727",
+      "role": "user"
+    },
+    {
+      "username": "jwc@bebesup.co.kr",
+      "id": "jwc",
+      "name": "최진원 실장",
+      "dept": "경영진 / Product Innovation (PI팀)",
+      "phone": "02-562-8617",
+      "role": "user"
+    },
+    {
+      "username": "ehkim@bebesup.co.kr",
+      "id": "ehkim",
+      "name": "김은혜 과장",
+      "dept": "Product Innovation (PI팀)",
+      "phone": "02-6325-8729",
+      "role": "user"
+    },
+    {
+      "username": "jwshin@bebesup.co.kr",
+      "id": "jwshin",
+      "name": "신지우 과장",
+      "dept": "Product Innovation (PI팀)",
+      "phone": "02-562-8618",
+      "role": "user"
+    },
+    {
+      "username": "jikim@bebesup.co.kr",
+      "id": "jikim",
+      "name": "김지인 주임",
+      "dept": "Product Innovation (PI팀)",
+      "phone": "02-6325-8738",
+      "role": "user"
+    },
+    {
+      "username": "ytkim@bebesup.co.kr",
+      "id": "ytkim",
+      "name": "김용태 팀장",
+      "dept": "경영관리팀",
+      "phone": "02-562-8187",
+      "role": "user"
+    },
+    {
+      "username": "yschoi@bebesup.co.kr",
+      "id": "yschoi",
+      "name": "최연서 과장",
+      "dept": "경영관리팀",
+      "phone": "02-569-8720",
+      "role": "user"
+    },
+    {
+      "username": "khkim@bebesup.co.kr",
+      "id": "khkim",
+      "name": "김관호 대리",
+      "dept": "경영관리팀",
+      "phone": "02-569-8722",
+      "role": "user"
+    },
+    {
+      "username": "hiyou@bebesup.co.kr",
+      "id": "hiyou",
+      "name": "유혜인 주임",
+      "dept": "경영관리팀",
+      "phone": "02-569-8721",
+      "role": "user"
+    },
+    {
+      "username": "hlee@bebesup.co.kr",
+      "id": "hlee",
+      "name": "이훈 팀장",
+      "dept": "이커머스 1팀",
+      "phone": "02-6325-8312",
+      "role": "user"
+    },
+    {
+      "username": "rjkim@bebesup.co.kr",
+      "id": "rjkim",
+      "name": "김례정 대리",
+      "dept": "이커머스 1팀",
+      "phone": "02-6325-8725",
+      "role": "user"
+    },
+    {
+      "username": "sklee@bebesup.co.kr",
+      "id": "sklee",
+      "name": "이선경 대리",
+      "dept": "이커머스 1팀",
+      "phone": "02-6325-8734",
+      "role": "user"
+    },
+    {
+      "username": "jykim@bebesup.co.kr",
+      "id": "jykim",
+      "name": "김주연 대리",
+      "dept": "이커머스 1팀",
+      "phone": "02-562-8625",
+      "role": "user"
+    },
+    {
+      "username": "khk@bebesup.co.kr",
+      "id": "khk",
+      "name": "김광한 팀장",
+      "dept": "이커머스 2팀",
+      "phone": "02-6325-8300",
+      "role": "user"
+    },
+    {
+      "username": "ejhyun@bebesup.co.kr",
+      "id": "ejhyun",
+      "name": "현은지 주임",
+      "dept": "이커머스 2팀",
+      "phone": "02-562-8619",
+      "role": "user"
+    },
+    {
+      "username": "jbp@bebesup.co.kr",
+      "id": "jbp",
+      "name": "박준범 팀장",
+      "dept": "SCM팀",
+      "phone": "02-562-8185",
+      "role": "user"
+    },
+    {
+      "username": "syma@bebesup.co.kr",
+      "id": "syma",
+      "name": "마상연 주임",
+      "dept": "SCM팀",
+      "phone": "02-565-3096",
+      "role": "user"
+    },
+    {
+      "username": "sbeom@bebesup.co.kr",
+      "id": "sbeom",
+      "name": "엄세빈 사원",
+      "dept": "SCM팀",
+      "phone": "02-6325-8728",
+      "role": "user"
+    },
+    {
+      "username": "ehkwon@bebesup.co.kr",
+      "id": "ehkwon",
+      "name": "권은형 사원",
+      "dept": "SCM팀",
+      "phone": "02-6325-8733",
+      "role": "user"
+    },
+    {
+      "username": "hshwang@bebesup.co.kr",
+      "id": "hshwang",
+      "name": "황현수 팀장",
+      "dept": "CX팀",
+      "phone": "02-6325-8313",
+      "role": "admin"
+    },
+    {
+      "username": "jhpark@bebesup.co.kr",
+      "id": "jhpark",
+      "name": "박주희 대리",
+      "dept": "CX팀",
+      "phone": "02-6325-8308",
+      "role": "admin"
+    },
+    {
+      "username": "sboh@bebesup.co.kr",
+      "id": "sboh",
+      "name": "오세빈 사원",
+      "dept": "CX팀",
+      "phone": "02-562-8621",
+      "role": "admin"
+    },
+    {
+      "username": "yshan@bebesup.co.kr",
+      "id": "yshan",
+      "name": "한윤서 사원",
+      "dept": "CX팀",
+      "phone": "02-6325-8307",
+      "role": "admin"
+    },
+    {
+      "username": "hrkim@bebesup.co.kr",
+      "id": "hrkim",
+      "name": "김하랑 사원",
+      "dept": "CX팀",
+      "phone": "02-6325-8743",
+      "role": "admin"
+    },
+    {
+      "username": "hwham@bebesup.co.kr",
+      "id": "hwham",
+      "name": "함형욱 팀장",
+      "dept": "마케팅팀",
+      "phone": "02-562-8622",
+      "role": "user"
+    },
+    {
+      "username": "bebesup@bebesup.co.kr",
+      "id": "bebesup",
+      "name": "윤은주 과장",
+      "dept": "마케팅팀",
+      "phone": "02-562-8623",
+      "role": "user"
+    },
+    {
+      "username": "mjkang@bebesup.co.kr",
+      "id": "mjkang",
+      "name": "강미정 대리",
+      "dept": "마케팅팀",
+      "phone": "02-562-8017",
+      "role": "user"
+    },
+    {
+      "username": "hyeonjchoi@bebesup.co.kr",
+      "id": "hyeonjchoi",
+      "name": "최현정 대리",
+      "dept": "마케팅팀",
+      "phone": "02-553-7005",
+      "role": "user"
+    },
+    {
+      "username": "hrback@bebesup.co.kr",
+      "id": "hrback",
+      "name": "백해린 대리",
+      "dept": "마케팅팀",
+      "phone": "02-562-8018",
+      "role": "user"
+    },
+    {
+      "username": "shl@bebesup.co.kr",
+      "id": "shl",
+      "name": "이소희 주임",
+      "dept": "마케팅팀",
+      "phone": "02-569-8723",
+      "role": "user"
+    },
+    {
+      "username": "jyj@bebesup.co.kr",
+      "id": "jyj",
+      "name": "조지연 팀장",
+      "dept": "디자인팀",
+      "phone": "02-6325-8730",
+      "role": "user"
+    },
+    {
+      "username": "yjl@bebesup.co.kr",
+      "id": "yjl",
+      "name": "이여진 과장",
+      "dept": "디자인팀",
+      "phone": "02-6325-8731",
+      "role": "user"
+    },
+    {
+      "username": "shlee@bebesup.co.kr",
+      "id": "shlee",
+      "name": "이소현 대리",
+      "dept": "디자인팀",
+      "phone": "02-6325-8740",
+      "role": "user"
+    },
+    {
+      "username": "kmham@bebesup.co.kr",
+      "id": "kmham",
+      "name": "함경민 대리",
+      "dept": "디자인팀",
+      "phone": "02-569-8737",
+      "role": "user"
+    },
+    {
+      "username": "yjk@bebesup.co.kr",
+      "id": "yjk",
+      "name": "김영재 주임",
+      "dept": "디자인팀",
+      "phone": "02-6325-8742",
+      "role": "user"
+    },
+    {
+      "username": "dsjeong@bebesup.co.kr",
+      "id": "dsjeong",
+      "name": "정다솜 사원",
+      "dept": "디자인팀",
+      "phone": "02-569-8719",
+      "role": "user"
+    }
+  ],
+  "last_synced": "2026-11-02 12:10:00"
+}
