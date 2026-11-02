@@ -34,14 +34,22 @@ def get_local_ip():
     except Exception:
         return "192.168.0.22"
 
+import shutil
+
 PORT = 8080
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DIRECTORY = str(PROJECT_ROOT / "dashboard")
+
 if os.name == "nt":
     CLOUDFLARED_BIN = PROJECT_ROOT / "tools" / "cloudflared.exe"
 else:
-    CLOUDFLARED_BIN = Path("/usr/local/bin/cloudflared")
-    if not CLOUDFLARED_BIN.exists():
-        CLOUDFLARED_BIN = Path("cloudflared")
+    bin_path = Path("/usr/local/bin/cloudflared")
+    if bin_path.exists():
+        CLOUDFLARED_BIN = bin_path
+    elif shutil.which("cloudflared"):
+        CLOUDFLARED_BIN = Path(shutil.which("cloudflared"))
+    else:
+        CLOUDFLARED_BIN = Path("/usr/local/bin/cloudflared")
 
 sync_lock = threading.Lock()
 sync_status = {
@@ -380,43 +388,47 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         sys.stderr.write(f"[{self.log_date_time_string()}] {format % args}\n")
 
 def start_cloudflare_tunnel():
-    if not CLOUDFLARED_BIN.exists():
-        return
-    import subprocess
-    import re
+    try:
+        if not CLOUDFLARED_BIN.exists():
+            print(f"[알림] cloudflared 실행 파일({CLOUDFLARED_BIN})이 없어 외부 터널은 생략하고 사내 웹서버를 가동합니다.")
+            return
+        import subprocess
+        import re
 
-    def _worker():
-        cmd = [str(CLOUDFLARED_BIN), "tunnel", "--url", f"http://localhost:{PORT}"]
-        try:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="ignore"
-            )
-            tunnel_info["proc"] = proc
-            url_file = Path(DIRECTORY) / "public_url.txt"
+        def _worker():
+            cmd = [str(CLOUDFLARED_BIN), "tunnel", "--url", f"http://localhost:{PORT}"]
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding="utf-8",
+                    errors="ignore"
+                )
+                tunnel_info["proc"] = proc
+                url_file = Path(DIRECTORY) / "public_url.txt"
 
-            for line in proc.stdout:
-                m = re.search(r'https://[a-zA-Z0-9-]+\.trycloudflare\.com', line)
-                if m:
-                    tunnel_url = m.group(0)
-                    tunnel_info["url"] = tunnel_url
-                    print("--------------------------------------------------")
-                    print(f" ★ [외부/모바일 공유 주소 발급 완료] -> {tunnel_url}")
-                    print("--------------------------------------------------")
-                    try:
-                        with open(url_file, "w", encoding="utf-8") as f:
-                            f.write(tunnel_url + "\n")
-                    except Exception:
-                        pass
-        except Exception as e:
-            print(f"[경고] Cloudflare 터널 실행 실패: {e}")
+                for line in proc.stdout:
+                    m = re.search(r'https://[a-zA-Z0-9-]+\.trycloudflare\.com', line)
+                    if m:
+                        tunnel_url = m.group(0)
+                        tunnel_info["url"] = tunnel_url
+                        print("--------------------------------------------------")
+                        print(f" ★ [외부/모바일 공유 주소 발급 완료] -> {tunnel_url}")
+                        print("--------------------------------------------------")
+                        try:
+                            with open(url_file, "w", encoding="utf-8") as f:
+                                f.write(tunnel_url + "\n")
+                        except Exception:
+                            pass
+            except Exception as e:
+                print(f"[경고] Cloudflare 터널 실행 실패: {e}")
 
-    t = threading.Thread(target=_worker, daemon=True)
-    t.start()
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+    except Exception as e:
+        print(f"[경고] Cloudflare 터널 초기화 실패: {e}")
 
 class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     daemon_threads = True
