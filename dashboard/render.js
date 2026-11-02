@@ -10609,17 +10609,88 @@ function init() {
   const shareTunnelInput = document.getElementById("shareTunnelInput");
   const copyNetworkBtn = document.getElementById("copyNetworkBtn");
   const copyTunnelBtn = document.getElementById("copyTunnelBtn");
+  const openTunnelLink = document.getElementById("openTunnelLink");
+
+  function copyTextFallback(text, btnElement) {
+    if (!text || text.includes("중...") || text.includes("확인")) return;
+    const updateButton = () => {
+      if (!btnElement) return;
+      const originalText = btnElement.textContent;
+      btnElement.textContent = "복사됨! ✓";
+      btnElement.classList.add("bg-emerald-600");
+      setTimeout(() => {
+        btnElement.textContent = originalText;
+        btnElement.classList.remove("bg-emerald-600");
+      }, 2000);
+    };
+
+    if (window.isSecureContext && navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(updateButton).catch(() => {
+        execCopyCommand(text, updateButton);
+      });
+    } else {
+      execCopyCommand(text, updateButton);
+    }
+  }
+
+  function execCopyCommand(text, onSuccess) {
+    try {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.top = "-9999px";
+      textarea.style.left = "-9999px";
+      textarea.style.opacity = "0";
+      textarea.setAttribute("readonly", "");
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      textarea.setSelectionRange(0, textarea.value.length);
+      const successful = document.execCommand("copy");
+      document.body.removeChild(textarea);
+      if (successful && onSuccess) {
+        onSuccess();
+      } else {
+        window.prompt("아래 주소를 복사(Ctrl+C)하세요:", text);
+      }
+    } catch (err) {
+      console.warn("Fallback copy failed:", err);
+      window.prompt("아래 주소를 복사(Ctrl+C)하세요:", text);
+    }
+  }
 
   if (btnShareServer && shareServerModal) {
+    [shareNetworkInput, shareTunnelInput].forEach((inp) => {
+      if (!inp) return;
+      inp.addEventListener("click", () => inp.select());
+    });
+
     btnShareServer.addEventListener("click", async () => {
       shareServerModal.classList.remove("hidden");
       try {
         const res = await fetch("/api/server_info");
         if (res.ok) {
           const info = await res.json();
-          if (info.network && shareNetworkInput) shareNetworkInput.value = info.network;
+          // 사내망 주소: 현재 접속 중인 LAN 호스트(예: 192.168.0.35:8080)가 유효하면 우선 반영
+          const currentOrigin = window.location.origin;
+          if (shareNetworkInput) {
+            if (currentOrigin && !currentOrigin.includes("localhost") && !currentOrigin.includes("127.0.0.1") && !currentOrigin.includes("trycloudflare")) {
+              shareNetworkInput.value = currentOrigin;
+            } else if (info.network) {
+              shareNetworkInput.value = info.network;
+            }
+          }
           if (shareTunnelInput) {
-            shareTunnelInput.value = info.tunnel || "보안 터널 연결 중...";
+            if (info.tunnel) {
+              shareTunnelInput.value = info.tunnel;
+              if (openTunnelLink) {
+                openTunnelLink.href = info.tunnel;
+                openTunnelLink.classList.remove("hidden");
+              }
+            } else {
+              shareTunnelInput.value = "보안 터널 생성 중...";
+              if (openTunnelLink) openTunnelLink.classList.add("hidden");
+            }
           }
         }
       } catch (e) {
@@ -10636,20 +10707,17 @@ function init() {
 
     if (copyNetworkBtn && shareNetworkInput) {
       copyNetworkBtn.addEventListener("click", () => {
-        navigator.clipboard.writeText(shareNetworkInput.value);
-        copyNetworkBtn.textContent = "복사됨!";
-        setTimeout(() => { copyNetworkBtn.textContent = "복사"; }, 2000);
+        copyTextFallback(shareNetworkInput.value, copyNetworkBtn);
       });
     }
 
     if (copyTunnelBtn && shareTunnelInput) {
       copyTunnelBtn.addEventListener("click", () => {
-        navigator.clipboard.writeText(shareTunnelInput.value);
-        copyTunnelBtn.textContent = "복사됨!";
-        setTimeout(() => { copyTunnelBtn.textContent = "복사"; }, 2000);
+        copyTextFallback(shareTunnelInput.value, copyTunnelBtn);
       });
     }
   }
+
 
   // ==========================================
   // 사내 인증 및 권한 제어 시스템 (관리자/사원)
