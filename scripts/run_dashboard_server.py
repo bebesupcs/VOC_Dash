@@ -46,6 +46,9 @@ except ImportError:
     sys.path.append(str(Path(__file__).resolve().parent))
     import employee_auth
 
+import importlib
+
+
 if os.name == "nt":
     CLOUDFLARED_BIN = PROJECT_ROOT / "tools" / "cloudflared.exe"
 else:
@@ -199,6 +202,39 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                     pass
             self.handle_login(body_data)
             return
+        elif clean_path == "/api/request_otp":
+            content_length = int(self.headers.get("Content-Length", 0))
+            body_bytes = self.rfile.read(content_length) if content_length > 0 else b""
+            body_data = {}
+            if body_bytes:
+                try:
+                    body_data = json.loads(body_bytes.decode("utf-8"))
+                except Exception:
+                    pass
+            self.handle_request_otp(body_data)
+            return
+        elif clean_path == "/api/verify_otp":
+            content_length = int(self.headers.get("Content-Length", 0))
+            body_bytes = self.rfile.read(content_length) if content_length > 0 else b""
+            body_data = {}
+            if body_bytes:
+                try:
+                    body_data = json.loads(body_bytes.decode("utf-8"))
+                except Exception:
+                    pass
+            self.handle_verify_otp(body_data)
+            return
+        elif clean_path == "/api/set_employee_role":
+            content_length = int(self.headers.get("Content-Length", 0))
+            body_bytes = self.rfile.read(content_length) if content_length > 0 else b""
+            body_data = {}
+            if body_bytes:
+                try:
+                    body_data = json.loads(body_bytes.decode("utf-8"))
+                except Exception:
+                    pass
+            self.handle_set_employee_role(body_data)
+            return
         elif clean_path == "/api/compensation_overrides":
             content_length = int(self.headers.get("Content-Length", 0))
             body_bytes = self.rfile.read(content_length) if content_length > 0 else b""
@@ -250,10 +286,17 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
 
     def handle_export_excel(self, target_period, memos=None, insights=None, user_info=None):
         from urllib.parse import quote
+        u = user_info or {}
+        if u.get("role") != "admin":
+            self.send_response(403)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "엑셀 다운로드는 관리자(CX팀) 전용 기능입니다."}, ensure_ascii=False).encode("utf-8"))
+            return
+
         try:
             client_ip = self.get_client_ip()
             user_agent = self.headers.get("User-Agent", "")[:100]
-            u = user_info or {}
             employee_auth.record_audit_log({
                 "action": "EXCEL_DOWNLOAD",
                 "username": u.get("username", "anonymous"),
@@ -419,6 +462,64 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.end_headers()
         self.wfile.write(json.dumps(result, ensure_ascii=False).encode("utf-8"))
+
+    def handle_request_otp(self, body_data):
+        email = (body_data.get("email") or body_data.get("username") or "").strip()
+        try:
+            importlib.reload(employee_auth)
+        except Exception:
+            pass
+        result = employee_auth.request_otp(email, PROJECT_ROOT)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(json.dumps(result, ensure_ascii=False).encode("utf-8"))
+
+    def handle_verify_otp(self, body_data):
+        email = (body_data.get("email") or body_data.get("username") or "").strip()
+        code = (body_data.get("code") or body_data.get("password") or "").strip()
+        result = employee_auth.verify_otp(email, code, PROJECT_ROOT)
+        if result.get("success"):
+            client_ip = self.get_client_ip()
+            user_agent = self.headers.get("User-Agent", "")[:100]
+            employee_auth.record_audit_log({
+                "action": "LOGIN",
+                "username": result.get("username"),
+                "name": result.get("name"),
+                "dept": result.get("dept"),
+                "role": result.get("role"),
+                "target": "회사 이메일 인증번호(OTP) 로그인 성공",
+                "ip": client_ip,
+                "user_agent": user_agent
+            }, PROJECT_ROOT)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(json.dumps(result, ensure_ascii=False).encode("utf-8"))
+
+    def handle_set_employee_role(self, body_data):
+        email = body_data.get("email")
+        role = body_data.get("role")
+        admin_user = body_data.get("admin_user") or {}
+        res = employee_auth.set_employee_role(email, role, PROJECT_ROOT)
+        if res.get("success"):
+            client_ip = self.get_client_ip()
+            user_agent = self.headers.get("User-Agent", "")[:100]
+            employee_auth.record_audit_log({
+                "action": "ADMIN_ROLE_CHANGE",
+                "username": admin_user.get("username", "admin"),
+                "name": admin_user.get("name", ""),
+                "dept": admin_user.get("dept", "CX팀"),
+                "role": "admin",
+                "target": f"권한 변경: {email} -> {role}",
+                "detail": f"{email} 계정 권한이 '{role}'(으)로 변경됨",
+                "ip": client_ip,
+                "user_agent": user_agent
+            }, PROJECT_ROOT)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(json.dumps(res, ensure_ascii=False).encode("utf-8"))
 
     def handle_record_audit_log(self, body_data):
         body_data["ip"] = self.get_client_ip()

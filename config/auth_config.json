@@ -14,5 +14,13 @@
       "name": "CX팀 사원",
       "description": "대시보드 전 지표 탐색, 필터링 및 클레임 사진 열람 (다운로드 제한)"
     }
-  ]
+  ],
+  "admin_emails": [
+    "hshwang@bebesup.co.kr",
+    "hrkim@bebesup.co.kr",
+    "jhpark@bebesup.co.kr",
+    "sboh@bebesup.co.kr",
+    "yshan@bebesup.co.kr"
+  ],
+  "custom_roles": {}
 }

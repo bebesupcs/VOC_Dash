@@ -311,33 +311,21 @@
 
 
         var now = Date.now();
+        var MAX_SESSION = 9 * 60 * 60 * 1000; // 최대 세션 유지 9시간 (8~10시간)
+        var INACTIVITY_LIMIT = 4 * 60 * 60 * 1000; // 연속 미활동 4시간 제한
 
+        var isExpired = false;
+        if (u && u.loginAt && (now - u.loginAt > MAX_SESSION)) {
+          isExpired = true;
+        } else if (u && u.lastActive && (now - u.lastActive > INACTIVITY_LIMIT)) {
+          isExpired = true;
+        }
 
-
-        var FOUR_HOURS = 4 * 60 * 60 * 1000;
-
-
-
-        if (u && u.lastActive && (now - u.lastActive > FOUR_HOURS)) {
-
-
-
+        if (isExpired) {
           localStorage.removeItem("voc_auth_user");
-
-
-
           sessionStorage.removeItem("voc_auth_user");
-
-
-
-        } else if (u && u.username && ["cx", "bebesup"].indexOf(u.username) !== -1) {
-
-
-
+        } else if (u && (u.username || u.email || u.id)) {
           document.documentElement.classList.add("is-authenticated");
-
-
-
         }
 
 
@@ -458,148 +446,78 @@
 
 
 
-    <form id="authLoginForm" class="mt-5 space-y-4">
-
-
-
+    <!-- Step 1: 회사 이메일 입력 화면 -->
+    <div id="authEmailStep" class="mt-5 space-y-4">
       <div>
-
-
-
-        <label class="block text-xs font-semibold text-zinc-700 mb-1.5">아이디 (ID)</label>
-
-
-
+        <label class="block text-xs font-semibold text-zinc-700 mb-1.5">회사 이메일 (사내 계정)</label>
         <div class="relative">
-
-
-
           <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-zinc-400">
-
-
-
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
-
-
-
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
           </span>
-
-
-
-          <input type="text" id="authUsernameInput" required autocomplete="username" placeholder="회사 이메일 입력 (예: hshwang@bebesup.co.kr 또는 hshwang)" class="w-full rounded-xl border border-zinc-200 bg-zinc-50/70 pl-9 pr-3 py-2.5 text-xs text-zinc-900 outline-none transition focus:border-teal-600 focus:bg-white focus:ring-2 focus:ring-teal-600/20">
+          <input type="email" id="authEmailInput" autofocus autocomplete="email" placeholder="회사 이메일 입력 (예: hshwang@bebesup.co.kr 또는 hshwang)" class="w-full rounded-xl border border-zinc-200 bg-zinc-50/70 pl-9 pr-3 py-2.5 text-xs text-zinc-900 outline-none transition focus:border-teal-600 focus:bg-white focus:ring-2 focus:ring-teal-600/20">
         </div>
         <p class="text-[10.5px] text-zinc-400 mt-1.5 flex items-center gap-1">
-          <span>💡</span> 사내 구글 시트 임직원 명부와 실시간 연동되어 있습니다. (기본 PW: bebesup1!)
+          <span>💡</span> 사내 구글 시트 임직원 명부와 연동되어 인증번호가 이메일로 전송됩니다.
         </p>
       </div>
 
+      <button type="button" id="btnSendOtp" class="w-full mt-2 flex items-center justify-center gap-2 rounded-xl bg-teal-600 hover:bg-teal-700 py-3 text-xs font-bold text-white shadow-md shadow-teal-600/20 active:scale-[0.99] transition cursor-pointer">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+        <span id="btnSendOtpText">인증번호 발송</span>
+      </button>
+    </div>
 
+    <!-- Step 2: 6자리 인증번호 입력 화면 -->
+    <div id="authOtpStep" class="mt-5 space-y-4 hidden">
+      <div class="rounded-xl bg-teal-50/80 border border-teal-200/80 p-3 text-xs text-teal-900">
+        <div class="flex items-center justify-between">
+          <span class="font-semibold flex items-center gap-1.5">
+            <span class="text-teal-600">✉️</span> 발송 완료
+          </span>
+          <span id="authOtpTimer" class="font-mono font-bold text-rose-600 text-xs bg-rose-50 px-2 py-0.5 rounded border border-rose-200">10:00</span>
+        </div>
+        <div class="mt-1.5 text-[11.5px] text-zinc-600">
+          <span id="authSentEmailMasked" class="font-bold text-teal-800 font-mono"></span>
+          <span id="authSentEmpBadge" class="text-zinc-500 font-medium"></span>
+          <div>사내 메일함으로 전송된 <strong>6자리 인증번호</strong>를 입력해주세요.</div>
+        </div>
+      </div>
 
       <div>
-
-
-
-        <label class="block text-xs font-semibold text-zinc-700 mb-1.5">비밀번호 (Password)</label>
-
-
-
+        <label class="block text-xs font-semibold text-zinc-700 mb-1.5">인증번호 (OTP 6자리)</label>
         <div class="relative">
-
-
-
-          <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-zinc-400">
-
-
-
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
-
-
-
-          </span>
-
-
-
-          <input type="password" id="authPasswordInput" required autocomplete="current-password" placeholder="비밀번호 입력" class="w-full rounded-xl border border-zinc-200 bg-zinc-50/70 pl-9 pr-10 py-2.5 text-xs text-zinc-900 outline-none transition focus:border-teal-600 focus:bg-white focus:ring-2 focus:ring-teal-600/20">
-
-
-
-          <button type="button" id="togglePasswordBtn" class="absolute inset-y-0 right-0 flex items-center pr-3 text-zinc-400 hover:text-zinc-600 cursor-pointer" title="비밀번호 보기/숨기기">
-
-
-
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
-
-
-
-          </button>
-
-
-
+          <input type="text" id="authOtpInput" maxlength="6" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" placeholder="000000" class="w-full text-center tracking-[0.5em] font-mono text-xl font-bold rounded-xl border border-zinc-200 bg-zinc-50/70 py-2.5 text-zinc-900 outline-none transition focus:border-teal-600 focus:bg-white focus:ring-2 focus:ring-teal-600/20">
         </div>
-
-
-
       </div>
 
-
-
-      <div id="authLoginError" class="hidden rounded-xl bg-rose-50 p-2.5 text-xs font-medium text-rose-600 border border-rose-200 flex items-center gap-1.5">
-
-
-
-        <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-
-
-
-        <span id="authLoginErrorText">아이디 또는 비밀번호가 올바르지 않습니다.</span>
-
-
-
-      </div>
-
-
-
-      <div class="flex items-center justify-between text-xs text-zinc-500 pt-0.5">
-
-
-
-        <label class="flex items-center gap-2 cursor-pointer select-none">
-
-
-
-          <input type="checkbox" id="authRememberMe" class="w-4 h-4 rounded border-zinc-300 text-teal-600 focus:ring-teal-500" checked>
-
-
-
-          <span class="font-medium text-zinc-600">로그인 상태 유지</span>
-
-
-
-        </label>
-
-
-
-      </div>
-
-
-
-      <button type="submit" id="authLoginBtn" class="w-full mt-2 flex items-center justify-center gap-2 rounded-xl bg-teal-600 hover:bg-teal-700 py-3 text-xs font-bold text-white shadow-md shadow-teal-600/20 active:scale-[0.99] transition cursor-pointer">
-
-
-
-        <span>대시보드 로그인</span>
-
-
-
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
-
-
-
+      <button type="button" id="btnVerifyOtp" class="w-full mt-2 flex items-center justify-center gap-2 rounded-xl bg-teal-600 hover:bg-teal-700 py-3 text-xs font-bold text-white shadow-md shadow-teal-600/20 active:scale-[0.99] transition cursor-pointer">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+        <span id="btnVerifyOtpText">인증 완료 및 로그인</span>
       </button>
 
+      <div class="flex items-center justify-between text-xs text-zinc-500 pt-1">
+        <button type="button" id="btnResendOtp" class="text-teal-700 hover:text-teal-800 hover:underline cursor-pointer font-medium flex items-center gap-1">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+          인증번호 재전송
+        </button>
+        <button type="button" id="btnBackToEmail" class="text-zinc-500 hover:text-zinc-700 hover:underline cursor-pointer">
+          다른 이메일 입력
+        </button>
+      </div>
+    </div>
 
+    <!-- 공통 에러 메시지 -->
+    <div id="authLoginError" class="mt-3 hidden rounded-xl bg-rose-50 p-2.5 text-xs font-medium text-rose-600 border border-rose-200 flex items-center gap-1.5">
+      <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+      <span id="authLoginErrorText">오류가 발생했습니다.</span>
+    </div>
 
-    </form>
+    <div class="flex items-center justify-between text-xs text-zinc-500 pt-3">
+      <label class="flex items-center gap-2 cursor-pointer select-none">
+        <input type="checkbox" id="authRememberMe" class="w-4 h-4 rounded border-zinc-300 text-teal-600 focus:ring-teal-500" checked>
+        <span class="font-medium text-zinc-600">이 브라우저에서 로그인 상태 유지 (최대 9시간)</span>
+      </label>
+    </div>
 
 
 
@@ -611,7 +529,7 @@
 
 
 
-      본 시스템은 (주)에이치비에프앤비 사내 보안 규정에 의해 보호되며, 비인가자의 무단 접근 및 정보 유출을 엄격히 금지합니다.
+      본 시스템은 베베숲 사내 보안 규정에 의해 보호되며, 비인가자의 무단 접근 및 정보 유출을 엄격히 금지합니다.
 
 
 
@@ -694,42 +612,15 @@
 
 
 
-      <div id="authUserInfoBar" class="mt-3 flex items-center justify-between rounded-xl bg-zinc-100/90 p-2 text-xs ring-1 ring-black/5">
-
-
-
+      <div id="authUserInfoBar" class="mt-2.5 flex items-center justify-between rounded-xl bg-zinc-100/90 px-2.5 py-1.5 text-xs ring-1 ring-black/5">
         <div class="flex items-center gap-1.5 min-w-0">
-
-
-
-          <span id="authUserRoleIcon" class="text-xs">👑</span>
-
-
-
-          <span id="authUserName" class="font-bold text-zinc-800 text-[11px] truncate">CX팀 관리자</span>
-
-
-
-          <span id="authUserBadge" class="rounded bg-teal-600 px-1.5 py-0.2 text-[9.5px] font-bold text-white shadow-2xs">관리자</span>
-
-
-
+          <span id="authUserRoleIcon" class="text-xs shrink-0">👑</span>
+          <span id="authUserName" class="font-bold text-zinc-800 text-xs truncate" title="사용자">황현수</span>
+          <span id="authUserBadge" class="shrink-0 whitespace-nowrap rounded bg-teal-600 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-2xs">관리자</span>
         </div>
-
-
-
-        <button id="authLogoutBtn" type="button" class="shrink-0 text-[10.5px] font-medium text-zinc-400 hover:text-rose-600 transition cursor-pointer px-1 py-0.5" title="로그아웃">
-
-
-
+        <button id="authLogoutBtn" type="button" class="shrink-0 whitespace-nowrap text-[10.5px] font-medium text-zinc-400 hover:text-rose-600 transition cursor-pointer pl-1.5" title="로그아웃">
           로그아웃
-
-
-
         </button>
-
-
-
       </div>
 
 
@@ -1005,6 +896,12 @@
       <button id="btnAuditLogModal" type="button" class="w-full flex items-center justify-center gap-1.5 rounded-lg bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-800 hover:bg-indigo-100 ring-1 ring-indigo-200 transition shadow-2xs cursor-pointer hidden" title="사내 임직원 접속 및 엑셀 다운로드 보안 감사 로그">
         <svg class="h-3.5 w-3.5 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
         <span>📋 보안 감사 로그</span>
+      </button>
+
+      <!-- 관리자 전용: 권한 등급 관리 버튼 -->
+      <button id="btnManageAdminsModal" type="button" class="w-full flex items-center justify-center gap-1.5 rounded-lg bg-teal-50 px-3 py-2 text-xs font-semibold text-teal-800 hover:bg-teal-100 ring-1 ring-teal-200 transition shadow-2xs cursor-pointer hidden" title="임직원별 관리자/일반 등급 권한 부여 및 해제">
+        <svg class="h-3.5 w-3.5 text-teal-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+        <span>👥 권한 등급 관리</span>
       </button>
 
 
@@ -8993,6 +8890,48 @@
       </div>
     </div>
 
+    <!-- 임직원 권한 관리 모달 (관리자 전용) -->
+    <div id="manageAdminsModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs transition-opacity duration-200 hidden">
+      <div class="w-full max-w-2xl max-h-[85vh] rounded-2xl bg-white p-5 shadow-2xl ring-1 ring-black/10 mx-4 border border-zinc-100 flex flex-col">
+        <div class="flex items-center justify-between pb-3.5 border-b border-zinc-100 shrink-0">
+          <div class="flex items-center gap-2">
+            <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-teal-50 text-teal-700 text-sm font-bold">👥</span>
+            <div>
+              <h3 class="text-sm font-bold text-zinc-900">사내 임직원 권한 등급 관리</h3>
+              <p class="text-xs text-zinc-500">관리자(admin) 등급은 엑셀 다운로드, 사진 열람, 데이터 최신화 권한이 부여됩니다.</p>
+            </div>
+          </div>
+          <button id="closeManageAdminsModalBtn" type="button" class="text-zinc-400 hover:text-zinc-600 p-1 text-2xl leading-none cursor-pointer">&times;</button>
+        </div>
+
+        <div class="mt-3 flex items-center gap-2 shrink-0">
+          <input type="text" id="adminEmpSearchInput" placeholder="이름, 부서, 이메일로 검색..." class="w-full rounded-lg border border-zinc-200 px-3 py-1.5 text-xs outline-none focus:border-teal-600">
+        </div>
+
+        <div class="mt-3 flex-1 overflow-y-auto min-h-[300px] border border-zinc-100 rounded-xl">
+          <table class="w-full text-left text-xs border-collapse">
+            <thead class="bg-zinc-50 sticky top-0 border-b border-zinc-200/80 text-[11px] font-semibold text-zinc-600">
+              <tr>
+                <th class="py-2.5 px-3">이름/직책</th>
+                <th class="py-2.5 px-3">부서</th>
+                <th class="py-2.5 px-3">이메일</th>
+                <th class="py-2.5 px-3 text-center">현재 권한</th>
+                <th class="py-2.5 px-3 text-center">권한 변경</th>
+              </tr>
+            </thead>
+            <tbody id="adminEmpTableBody" class="divide-y divide-zinc-100">
+              <tr><td colspan="5" class="py-8 text-center text-zinc-400">임직원 목록을 불러오는 중...</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="mt-3 pt-2.5 border-t border-zinc-100 flex items-center justify-between shrink-0">
+          <p class="text-[10.5px] text-zinc-400">💡 config/auth_config.json 파일의 "admin_emails" 목록에 영구 저장됩니다.</p>
+          <button id="closeManageAdminsModalBtn2" type="button" class="px-4 py-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 rounded-lg text-xs font-semibold cursor-pointer">닫기</button>
+        </div>
+      </div>
+    </div>
+
 
 
 
@@ -9023,7 +8962,7 @@
 
 
 
-<script src="render.js?v=20261027_1635"></script>
+<script src="render.js?v=20261103_0915"></script>
 
 
 

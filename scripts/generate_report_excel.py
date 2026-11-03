@@ -23,8 +23,14 @@ import tempfile
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from PIL import Image as PILImage
-from openpyxl.drawing.image import Image as OpenpyxlImage
+try:
+    from PIL import Image as PILImage
+    from openpyxl.drawing.image import Image as OpenpyxlImage
+    HAS_PIL = True
+except ImportError:
+    PILImage = None
+    OpenpyxlImage = None
+    HAS_PIL = False
 
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -244,7 +250,7 @@ def read_claim_photo_bytes(folder_name, file_name, is_thumb=False):
     if not os.path.exists(full_path):
         return None, None
 
-    if is_thumb:
+    if is_thumb and PILImage is not None:
         try:
             mtime = int(os.path.getmtime(full_path))
             cache_key = hashlib.md5(f"{safe_folder}_{safe_file}".encode("utf-8")).hexdigest()
@@ -1939,28 +1945,29 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
             ws_photo.row_dimensions[cur_row + 1].height = 24 # Caption row
             ws_photo.row_dimensions[cur_row + 2].height = 12 # Spacing row
 
-            try:
-                # 썸네일 캐시를 활용하여 고속 로드 및 메모리 절감
-                thumb_bytes, mime = read_claim_photo_bytes(fld, fn, is_thumb=True)
-                if thumb_bytes:
-                    img_buf = io.BytesIO(thumb_bytes)
-                    img = OpenpyxlImage(img_buf)
-                    img.width = 220
-                    img.height = 170
-                    cell_ref = f"{get_column_letter(col)}{cur_row}"
-                    ws_photo.add_image(img, cell_ref)
-                else:
-                    with PILImage.open(fp) as im:
-                        w, h = im.size
-                        scale = min(220 / w, 170 / h)
-                        nw, nh = max(1, int(w * scale)), max(1, int(h * scale))
-                        img = OpenpyxlImage(fp)
-                        img.width = nw
-                        img.height = nh
+            if HAS_PIL and OpenpyxlImage is not None:
+                try:
+                    # 썸네일 캐시를 활용하여 고속 로드 및 메모리 절감
+                    thumb_bytes, mime = read_claim_photo_bytes(fld, fn, is_thumb=True)
+                    if thumb_bytes:
+                        img_buf = io.BytesIO(thumb_bytes)
+                        img = OpenpyxlImage(img_buf)
+                        img.width = 220
+                        img.height = 170
                         cell_ref = f"{get_column_letter(col)}{cur_row}"
                         ws_photo.add_image(img, cell_ref)
-            except Exception as img_err:
-                print(f"Warning: Failed to add image {fn}:", img_err)
+                    elif PILImage is not None:
+                        with PILImage.open(fp) as im:
+                            w, h = im.size
+                            scale = min(220 / w, 170 / h)
+                            nw, nh = max(1, int(w * scale)), max(1, int(h * scale))
+                            img = OpenpyxlImage(fp)
+                            img.width = nw
+                            img.height = nh
+                            cell_ref = f"{get_column_letter(col)}{cur_row}"
+                            ws_photo.add_image(img, cell_ref)
+                except Exception as img_err:
+                    print(f"Warning: Failed to add image {fn}:", img_err)
 
             label_txt = os.path.splitext(fn)[0]
             if is_month or is_quarter:
