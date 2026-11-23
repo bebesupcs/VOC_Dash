@@ -50,7 +50,7 @@ def backup_source_to_nas(log_func=print):
             subprocess.run(["git", "remote", "set-url", "nas", str(NAS_GIT_DIR)], check=True, cwd=str(LOCAL_SRC), encoding="utf-8", errors="replace")
 
         log_func("▶ [2/3] NAS Git 저장소로 커밋 동기화(git push)...")
-        push_res = subprocess.run(["git", "push", "nas", "master", "-f"], capture_output=True, encoding="utf-8", errors="replace", cwd=str(LOCAL_SRC))
+        push_res = subprocess.run(["git", "push", "nas", "main", "-f"], capture_output=True, encoding="utf-8", errors="replace", cwd=str(LOCAL_SRC))
         if push_res.returncode == 0:
             log_func(f"  ✨ Git 히스토리 전체 동기화 성공: {NAS_GIT_DIR}")
         else:
@@ -91,7 +91,7 @@ def backup_source_to_nas(log_func=print):
         for r in ["origin", "github"]:
             if r in remotes_out:
                 log_func(f"▶ 원격 Git({r})으로 푸시 중...")
-                r_res = subprocess.run(["git", "push", r, "master"], capture_output=True, encoding="utf-8", errors="replace", cwd=str(LOCAL_SRC))
+                r_res = subprocess.run(["git", "push", r, "main"], capture_output=True, encoding="utf-8", errors="replace", cwd=str(LOCAL_SRC))
                 if r_res.returncode == 0:
                     log_func(f"  ✨ 원격 Git({r}) 동기화 완료!")
                 else:
