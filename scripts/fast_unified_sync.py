@@ -482,6 +482,13 @@ def run_fast_patch(force_export=False, sync_api=False, api_days=7):
     except Exception as be:
         log(f"  ⚠️ 로컬 백업 자동 동기화 건너뜀: {be}", log_file)
 
+    # 7. 개발 소스 코드 NAS 및 Git 자동 백업 (X:\_개발소스_백업)
+    try:
+        from backup_source_code import backup_source_to_nas
+        backup_source_to_nas(log_func=lambda m: log(m, log_file))
+    except Exception as se:
+        log(f"  ⚠️ 개발 소스 코드 백업 건너뜀: {se}", log_file)
+
     total_time = time.time() - t_start
     log("=" * 60, log_file)
     log(f"🎉 [패치 완료] 총 소요 시간: {total_time:.1f}초 (변경반영: {any_changed})", log_file)
