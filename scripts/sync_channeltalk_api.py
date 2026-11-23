@@ -1041,8 +1041,8 @@ def run_sync(access_key=None, access_secret=None, days=None, full=False, export_
         print("📊 VOC 대시보드 데이터 자동 갱신 트리거")
         print("=" * 60)
         try:
-            from export_dashboard_data import extract_dashboard_data, resolve_db_path
-            resolved_db = resolve_db_path(str(db_path))
+            from export_dashboard_data import extract_dashboard_data, resolve_db_path as exp_resolve_db_path
+            resolved_db = exp_resolve_db_path(str(db_path))
             extract_dashboard_data(str(resolved_db), DASHBOARD_DIR)
             print("✓ 대시보드 데이터(data.js, data.json) 갱신 완료!")
         except Exception as e:

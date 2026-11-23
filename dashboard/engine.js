@@ -18,26 +18,26 @@ const { PARSED_TAGS, CHANNELS, WEEKS, MONTHS, QUARTERS = [], YEARS = [], genChat
 
 
 
+let initMode = "weekly";
+let initIndex = (Array.isArray(WEEKS) && WEEKS.length >= 2) ? WEEKS.length - 2 : (WEEKS.length - 1);
+try {
+  const u = new URLSearchParams(window.location.search);
+  const sMode = u.get("mode") || sessionStorage.getItem("voc_current_mode") || localStorage.getItem("voc_current_mode");
+  const sWeek = u.get("week") || sessionStorage.getItem("voc_current_period_key") || localStorage.getItem("voc_current_period_key") || sessionStorage.getItem("voc_current_week") || localStorage.getItem("voc_current_week");
+  if (sMode && ["weekly", "monthly", "quarterly", "yearly"].includes(sMode)) {
+    initMode = sMode;
+  }
+  if (initMode === "weekly" && sWeek && Array.isArray(WEEKS)) {
+    const foundIdx = WEEKS.findIndex(w => w.key === sWeek);
+    if (foundIdx !== -1) initIndex = foundIdx;
+  }
+} catch (e) {}
+
 const state = {
-
-
-
-  mode: "weekly",
-
-
-
-  periodIndex: WEEKS.length - 1,
-
-
-
+  mode: initMode,
+  periodIndex: initIndex,
   filters: { channel: "all", journey: "all", brand: "all", nature: "all", risk: "all" },
-
-
-
   uniqueIssueOnly: false,
-
-
-
 };
 
 
@@ -160,6 +160,15 @@ function getAllCti() {
 
 
 
+}
+
+let _allShipmentsCache = null;
+
+function getAllShipments() {
+  if (!_allShipmentsCache && window.VOC_DATA && window.VOC_DATA.SHIPMENTS_BY_WEEK) {
+    _allShipmentsCache = Object.values(window.VOC_DATA.SHIPMENTS_BY_WEEK).flat();
+  }
+  return _allShipmentsCache || [];
 }
 
 
@@ -393,89 +402,74 @@ function boardCountForWeek(week) {
 
 
 function boardCount(period) {
-
-
-
   if (!period) return 0;
 
-
-
-  if (period.weekKeys && period.weekKeys.length) {
-
-
-
-    return period.weekKeys.reduce((s, k) => s + boardCountForWeek(WEEKS.find((x) => x.key === k)), 0);
-
-
-
+  // 1. 월간 모드: 달력 1일~말일 기준 엄격 적용 (10월: 805건)
+  if (period.key && /^\d{4}-\d{2}$/.test(period.key)) {
+    if (window.VOC_DATA && window.VOC_DATA.BOARD_COUNT_BY_MONTH && window.VOC_DATA.BOARD_COUNT_BY_MONTH[period.key] !== undefined) {
+      return window.VOC_DATA.BOARD_COUNT_BY_MONTH[period.key];
+    }
   }
 
+  // 2. 분기 모드: 해당 분기 3개 월 달력 기준 엄격 적용
+  if (period.key && /^\d{4}-Q[1-4]$/.test(period.key)) {
+    if (window.VOC_DATA && window.VOC_DATA.BOARD_COUNT_BY_QUARTER && window.VOC_DATA.BOARD_COUNT_BY_QUARTER[period.key] !== undefined) {
+      return window.VOC_DATA.BOARD_COUNT_BY_QUARTER[period.key];
+    }
+  }
 
+  // 3. 연간 모드: 해당 연도 전체 달력 기준 엄격 적용
+  if (period.key && /^\d{4}$/.test(period.key)) {
+    if (window.VOC_DATA && window.VOC_DATA.BOARD_COUNT_BY_YEAR && window.VOC_DATA.BOARD_COUNT_BY_YEAR[period.key] !== undefined) {
+      return window.VOC_DATA.BOARD_COUNT_BY_YEAR[period.key];
+    }
+  }
+
+  // 4. 주간 모드: 운영 주차 기준
+  if (period.weekKeys && period.weekKeys.length) {
+    return period.weekKeys.reduce((s, k) => s + boardCountForWeek(WEEKS.find((x) => x.key === k)), 0);
+  }
 
   return boardCountForWeek(WEEKS.find((x) => x.key === period.key));
-
-
-
 }
 
-
-
-
-
-
-
 function boardMalls(period) {
+  if (!period || !window.VOC_DATA) return {};
 
-
-
-  if (!period || !window.VOC_DATA || !window.VOC_DATA.BOARD_MALLS_BY_WEEK) return {};
-
-
-
-  if (period.weekKeys && period.weekKeys.length) {
-
-
-
-    const res = {};
-
-
-
-    for (const k of period.weekKeys) {
-
-
-
-      const m = window.VOC_DATA.BOARD_MALLS_BY_WEEK[k] || {};
-
-
-
-      for (const [mall, cnt] of Object.entries(m)) {
-
-
-
-        res[mall] = (res[mall] || 0) + cnt;
-
-
-
-      }
-
-
-
+  // 1. 월간 모드: 달력 1일~말일 기준
+  if (period.key && /^\d{4}-\d{2}$/.test(period.key)) {
+    if (window.VOC_DATA.BOARD_MALLS_BY_MONTH && window.VOC_DATA.BOARD_MALLS_BY_MONTH[period.key]) {
+      return window.VOC_DATA.BOARD_MALLS_BY_MONTH[period.key];
     }
-
-
-
-    return res;
-
-
-
   }
 
+  // 2. 분기 모드: 해당 분기 3개 월 달력 기준
+  if (period.key && /^\d{4}-Q[1-4]$/.test(period.key)) {
+    if (window.VOC_DATA.BOARD_MALLS_BY_QUARTER && window.VOC_DATA.BOARD_MALLS_BY_QUARTER[period.key]) {
+      return window.VOC_DATA.BOARD_MALLS_BY_QUARTER[period.key];
+    }
+  }
 
+  // 3. 연간 모드: 해당 연도 전체 달력 기준
+  if (period.key && /^\d{4}$/.test(period.key)) {
+    if (window.VOC_DATA.BOARD_MALLS_BY_YEAR && window.VOC_DATA.BOARD_MALLS_BY_YEAR[period.key]) {
+      return window.VOC_DATA.BOARD_MALLS_BY_YEAR[period.key];
+    }
+  }
 
-  return window.VOC_DATA.BOARD_MALLS_BY_WEEK[period.key] || {};
+  // 4. 주간 모드: 운영 주차 기준
+  if (period.weekKeys && period.weekKeys.length) {
+    const res = {};
+    for (const k of period.weekKeys) {
+      const m = (window.VOC_DATA.BOARD_MALLS_BY_WEEK && window.VOC_DATA.BOARD_MALLS_BY_WEEK[k]) || {};
+      for (const [mall, cnt] of Object.entries(m)) {
+        res[mall] = (res[mall] || 0) + cnt;
+      }
+    }
+    return res;
+  }
 
-
-
+  return (window.VOC_DATA.BOARD_MALLS_BY_WEEK && window.VOC_DATA.BOARD_MALLS_BY_WEEK[period.key]) || {};
 }
 
 
@@ -545,29 +539,35 @@ function shipmentsForWeekKey(weekKey) {
 
 
 function rawShipments(period) {
-
-
-
   if (!period) return [];
 
-
-
-  if (period.weekKeys && period.weekKeys.length) {
-
-
-
-    return period.weekKeys.flatMap(shipmentsForWeekKey);
-
-
-
+  // 1. 월간 모드: 달력 1일 00:00:00 ~ 말일 23:59:59 엄격 적용
+  if (period.key && /^\d{4}-\d{2}$/.test(period.key)) {
+    const mPrefix = period.key;
+    return getAllShipments().filter((s) => (s.claimDate && s.claimDate.startsWith(mPrefix)) || (s.date && s.date.startsWith(mPrefix)));
   }
 
+  // 2. 분기 모드: 해당 분기 3개 월 달력 기준 엄격 적용
+  if (period.key && /^\d{4}-Q[1-4]$/.test(period.key)) {
+    const y = period.key.slice(0, 4);
+    const q = parseInt(period.key.slice(6), 10);
+    const startM = (q - 1) * 3 + 1;
+    const months = [startM, startM + 1, startM + 2].map((m) => `${y}-${String(m).padStart(2, "0")}`);
+    return getAllShipments().filter((s) => months.some((m) => (s.claimDate && s.claimDate.startsWith(m)) || (s.date && s.date.startsWith(m))));
+  }
 
+  // 3. 연간 모드: 해당 연도 전체 달력 기준 엄격 적용
+  if (period.key && /^\d{4}$/.test(period.key)) {
+    const yPrefix = period.key;
+    return getAllShipments().filter((s) => (s.claimDate && s.claimDate.startsWith(yPrefix)) || (s.date && s.date.startsWith(yPrefix)));
+  }
+
+  // 4. 주간 모드: 운영 주차 기준
+  if (period.weekKeys && period.weekKeys.length) {
+    return period.weekKeys.flatMap(shipmentsForWeekKey);
+  }
 
   return shipmentsForWeekKey(period.key);
-
-
-
 }
 
 
@@ -836,590 +836,223 @@ const CTI_TARGET_REASONS = [
 
 
 
-function aggregateCti(period) {
+let _channelTalkMode = false;
 
+function setChannelTalkMode(val) {
+  _channelTalkMode = Boolean(val);
+  if (typeof window !== "undefined") {
+    window.__CHANNELTALK_MODE = _channelTalkMode;
+    window.__CTI_INCLUDE_OUT_ABSENT = _channelTalkMode;
+  }
+}
 
+function getChannelTalkMode() {
+  if (typeof window !== "undefined" && window.__CHANNELTALK_MODE != null) {
+    return window.__CHANNELTALK_MODE;
+  }
+  return _channelTalkMode;
+}
 
+const setOutboundIncludeAbsent = setChannelTalkMode;
+const getOutboundIncludeAbsent = getChannelTalkMode;
+
+function aggregateCti(period, options = {}) {
   const calls = rawCti(period);
+  const totalCallsRaw = calls.length;
 
-
-
-  const totalCalls = calls.length;
-
-
-
-
-
-
+  const isCtMode = (options && options.isChannelTalkMode != null)
+    ? Boolean(options.isChannelTalkMode)
+    : (options && options.includeOutAbsent != null ? Boolean(options.includeOutAbsent) : getChannelTalkMode());
 
   let inTotal = 0;
-
-
-
   let inAns = 0;
-
-
-
   let inMissed = 0;
-
-
-
+  let inOpMissed = 0; // 운영시간 내 부재
+  let inOffMissed = 0; // 운영시간 외 (야간/주말) ARS
   let inTargetMissed = 0;
-
-
-
   let inNonTargetMissed = 0;
-
-
+  let ivrWorkflowResolved = 0; // IVR/AI 워크플로우 자체 해결 (18건)
 
   let outAttempts = 0;
-
-
-
-  let outAns = 0;
-
-
-
-  let outMissed = 0;
-
-
+  let outAllAns = 0;
+  let outAllMiss = 0;
+  let outPureAns = 0;
 
   let talkSecSum = 0;
-
-
-
   let talkSecCount = 0;
-
-
-
   let waitSecSum = 0;
-
-
-
   let longCalls = 0; // 10분(600초) 이상 통화
 
-
-
-
-
-
-
   const missedReasonMap = {};
-
-
-
   const agentMap = {};
 
-
-
-
-
-
-
   for (const c of calls) {
-
-
-
     const isOut = c.dir === "outbound";
-
-
-
     const isIn = c.dir === "inbound" || c.dir === "missed";
-
-
-
     const isAnswered = c.ans === 1;
 
-
-
-
-
-
-
     if (isIn) {
-
-
-
       inTotal++;
-
-
-
       if (isAnswered) {
-
-
-
         inAns++;
-
-
-
       } else {
-
-
-
         inMissed++;
-
-
-
-        const isOp = isOperatingHour(c.time);
-
-
-
-        let reason = (c.reason || "").trim() || "기타 포기";
-
-
-
-
-
-
-
-        let isTarget = false;
-
-
-
-        if (CTI_TARGET_REASONS.includes(reason)) {
-
-
-
-          isTarget = true;
-
-
-
-        } else if (reason === "대기열에서 고객 종료") {
-
-
-
-          if (isOp) {
-
-
-
-            isTarget = true;
-
-
-
-            reason = "대기열 고객종료 (운영시간 내)";
-
-
-
-          } else {
-
-
-
-            isTarget = false;
-
-
-
-            reason = "대기열 고객종료 (운영시간 외)";
-
-
-
-          }
-
-
-
+        const isOp = c.is_in_hours != null ? Boolean(c.is_in_hours) : isOperatingHour(c.time);
+        if (isOp) {
+          inOpMissed++;
+        } else {
+          inOffMissed++;
         }
 
-
-
-
-
-
+        let reason = (c.reason || "").trim();
+        let isTarget = false;
+        if (reason.includes("액션") || reason.includes("워크플로우")) {
+          ivrWorkflowResolved++;
+          isTarget = false;
+        } else if (CTI_TARGET_REASONS.includes(reason)) {
+          isTarget = true;
+        } else if (reason === "대기열에서 고객 종료") {
+          if (isOp) {
+            isTarget = true;
+            reason = "대기열 고객종료 (운영시간 내)";
+          } else {
+            isTarget = false;
+            reason = "대기열 고객종료 (운영시간 외)";
+          }
+        } else if (!reason) {
+          reason = isOp ? "상담원 연결 전 종료" : "운영시간 외 ARS 안내";
+          isTarget = false;
+        } else {
+          isTarget = false;
+        }
 
         if (isTarget) inTargetMissed++;
-
-
-
         else inNonTargetMissed++;
 
-
-
-
-
-
-
         missedReasonMap[reason] = (missedReasonMap[reason] || 0) + 1;
-
-
-
       }
-
-
-
     } else if (isOut) {
-
-
-
       outAttempts++;
-
-
-
-      // 상담원이 전화를 걸었으나 고객이 받지 않은 경우 '단순/Call-Chat/부재' 태그로 완벽 구분!
-
-
-
-      const isAbsent = (c.tag || "").includes("부재") || (c.reason || "").includes("부재") || c.ans === 0;
-
-
-
-      if (isAbsent) {
-
-
-
-        outMissed++;
-
-
-
+      const isAbsent = !isAnswered || (c.tag || "").includes("부재") || (c.reason || "").includes("부재");
+      if (isAnswered) {
+        outAllAns++;
+        if (!isAbsent) {
+          outPureAns++;
+        }
       } else {
-
-
-
-        outAns++;
-
-
-
+        outAllMiss++;
       }
-
-
-
     }
-
-
-
-
-
-
 
     if (isAnswered && c.talk > 0) {
-
-
-
       talkSecSum += c.talk;
-
-
-
       talkSecCount++;
-
-
-
       if (c.talk >= 600) {
-
-
-
         longCalls++;
-
-
-
       }
-
-
-
     }
-
-
 
     if (c.wait > 0) {
-
-
-
       waitSecSum += c.wait;
-
-
-
     }
 
-
-
-
-
-
-
-    const ag = c.agent && c.agent !== "미배정" ? c.agent : (isAnswered ? "기타상담원" : "미배정(포기호)");
-
-
-
+    const ag = c.agent && c.agent !== "미배정" ? c.agent : (isAnswered ? "기타" : "미배정(포기호)");
     if (!agentMap[ag]) {
-
-
-
-      agentMap[ag] = { agent: ag, inAns: 0, outAns: 0, totalAns: 0, totalTalkSec: 0, maxTalkSec: 0, missedAssigned: 0, longCalls: 0 };
-
-
-
+      agentMap[ag] = { agent: ag, inAns: 0, outAns: 0, totalAns: 0, totalTalkSec: 0, maxTalkSec: 0, missedAssigned: 0, longCalls: 0, outAttempts: 0, outMissed: 0 };
     }
-
-
-
-    if (isAnswered) {
-
-
-
+    if (isOut) {
+      agentMap[ag].outAttempts++;
+      if (!isAnswered) agentMap[ag].outMissed++;
+    }
+    const isCountedOut = !isOut || (isCtMode ? isAnswered : (!((c.tag || "").includes("부재") || (c.reason || "").includes("부재"))));
+    if (isAnswered && (isIn || isCountedOut)) {
       if (isIn) agentMap[ag].inAns++;
-
-
-
       if (isOut) agentMap[ag].outAns++;
-
-
-
       agentMap[ag].totalAns++;
-
-
-
       agentMap[ag].totalTalkSec += c.talk;
-
-
-
       if (c.talk > agentMap[ag].maxTalkSec) agentMap[ag].maxTalkSec = c.talk;
-
-
-
       if (c.talk >= 600) agentMap[ag].longCalls++;
-
-
-
     } else {
-
-
-
       agentMap[ag].missedAssigned++;
-
-
-
     }
-
-
-
   }
 
+  // 1. 순수 실통화 완료 (수신 실통화 + 발신 순수 실통화)
+  const realTotalCalls = inAns + outPureAns; // W43: 56 + 37 = 93건
+  // 2. 채널톡 공식 전화 수 (수신 성공 + 수신 부재 + 발신 성공 + 발신 미연결)
+  const channelTalkTotal = inAns + inTargetMissed + outAllAns + outAllMiss; // W43: 56 + 6 + 48 + 27 = 137건
+  
+  // 모드에 따른 주요 지표 설정
+  const totalCalls = isCtMode ? channelTalkTotal : realTotalCalls;
+  const inRealTotal = inAns;
+  const outTotal = isCtMode ? outAllAns : outPureAns;
+  const outMissed = isCtMode ? outAllMiss : (outAttempts - outPureAns);
+  const outAns = outTotal;
+  const inRawTotal = inTotal;
+  const rawTotalCalls = inTotal + outAttempts;
 
-
-
-
-
-
-  // 아웃바운드: 부재(미연결) 제외하고 실제 통화된 실통화건만 공식 집계!
-
-
-
-  const outTotal = outAns; // 실통화건만 체크 (사용자 원칙: 부재 제외)
-
-
-
-
-
-
-
-  // 운영시간 내 실질 인바운드 인입 (응답 성공 + 대기열 실질 부재호)
-
-
-
-  // ※ 운영시간 외 ARS 자동안내(inNonTargetMissed)는 상담원 통화 실적이 아니므로 인바운드 및 총통화에서 제외하여 8월 이전과 9월 이후 기준 통일!
-
-
-
-  const inRealTotal = inAns + inTargetMissed;
-
-
-
-  const inRawTotal = inTotal; // ARS 포함 전체 인입 시도
-
-
-
-  const realTotalCalls = inRealTotal + outTotal; // 실질 CTI 통화 처리량 (운영시간 외 제외 및 아웃바운드 실통화)
-
-
-
-  const rawTotalCalls = totalCalls; // ARS 및 부재 포함 전체
-
-
-
-
-
-
-
-  // 채널톡 공식 실질 응답률 (Answer Rate: 응답 콜 / (응답 콜 + 실질 부재호))
-
-
-
-  const targetCalls = inRealTotal;
-
-
-
+  // 채널톡 공식 실질 응답률 (Answer Rate: 응답 콜 / (응답 콜 + 실질 대기열 부재호))
+  const targetCalls = inAns + inTargetMissed;
   const answerRate = targetCalls > 0 ? (inAns / targetCalls) * 100 : 0;
 
-
-
   // 전체 인입 연결률 (Connect Rate: 응답 콜 / ARS 포함 전체 인바운드 인입)
-
-
-
   const connectRate = inRawTotal > 0 ? (inAns / inRawTotal) * 100 : 0;
-
-
-
-  const outboundRate = outAttempts > 0 ? (outAns / outAttempts) * 100 : 0;
-
-
+  const outboundRate = outAttempts > 0 ? (outTotal / outAttempts) * 100 : 0;
 
   const avgTalkSec = talkSecCount > 0 ? Math.round(talkSecSum / talkSecCount) : 0;
-
-
-
   const avgWaitSec = realTotalCalls > 0 ? Math.round(waitSecSum / realTotalCalls) : 0;
 
-
-
-
-
-
-
   const missedReasons = Object.entries(missedReasonMap)
-
-
-
     .map(([reason, count]) => ({ reason, count, pct: inMissed > 0 ? ((count / inMissed) * 100).toFixed(1) : "0" }))
-
-
-
     .sort((a, b) => b.count - a.count);
 
-
-
-
-
-
-
   const agentStats = Object.values(agentMap)
-
-
-
     .filter(a => a.agent !== "미배정(포기호)")
-
-
-
     .map(a => ({
-
-
-
       ...a,
-
-
-
       avgTalkSec: a.totalAns > 0 ? Math.round(a.totalTalkSec / a.totalAns) : 0
-
-
-
     }))
-
-
-
     .sort((a, b) => b.totalAns - a.totalAns);
 
-
-
-
-
-
-
   return {
-
-
-
-    totalCalls: realTotalCalls, // 실질 CTI 통화 처리량 (인바운드 실질 + 아웃바운드 실통화)
-
-
-
-    rawTotalCalls,              // ARS 및 부재 포함 전체 시도
-
-
-
-    inTotal: inRealTotal,       // 실질 인바운드
-
-
-
-    inRawTotal,                 // ARS 포함 인바운드
-
-
-
+    totalCalls,                 // 모드 반영: 채널톡 137건 / 실통화 93건
+    realTotalCalls,             // 순수 실통화 93건
+    channelTalkTotal,           // 채널톡 공식 137건
+    ivrWorkflowResolved,        // IVR 워크플로우 자체 해결 18건
+    isChannelTalkMode: isCtMode,
+    totalConnected: realTotalCalls,
+    rawTotalCalls,
+    inTotal: inRealTotal,
+    inConnected: inAns,
+    inRawTotal,
     inAns,
-
-
-
     inMissed,
-
-
-
+    inOpMissed,
+    inOffMissed,
     inTargetMissed,
-
-
-
-    inNonTargetMissed,          // 운영시간 외 자동안내 건수
-
-
-
+    inNonTargetMissed,
     targetCalls,
-
-
-
     answerRate,
-
-
-
     connectRate,
-
-
-
-    inboundRate: answerRate, // 하위 호환성 유지
-
-
-
-    outTotal,                   // 실통화 건수 (부재 제외)
-
-
-
-    outAttempts,                // 전체 발신 시도 (부재 포함)
-
-
-
-    outAns,                     // 실통화 건수
-
-
-
-    outMissed,                  // 부재 미연결 건수
-
-
-
+    inboundRate: answerRate,
+    outTotal,                   // 모드 반영: 채널톡 48건 / 실통화 37건
+    outConnected: outAns,
+    outAttempts,                // 75건
+    outAns,
+    outMissed,                  // 모드 반영: 채널톡 27건 / 실통화 38건
+    outAllAns,                  // 48건
+    outAllMiss,                 // 27건
+    outPureAns,                 // 37건
+    outPureMiss: outAttempts - outPureAns,
     outboundRate,
-
-
-
+    includeOutAbsent: isCtMode,
     avgTalkSec,
-
-
-
     avgWaitSec,
-
-
-
     longCalls,
-
-
-
     missedReasons,
-
-
-
     agentStats,
-
-
-
     calls
-
-
-
   };
-
-
-
 }
 
 
@@ -1513,17 +1146,23 @@ function getRawSummary(period) {
 
 
   if (!period || !window.VOC_DATA || !window.VOC_DATA.RAW_SUMMARY) return null;
+  const isCtMode = getChannelTalkMode();
 
 
 
   if (window.VOC_DATA.RAW_SUMMARY[period.key]) {
-
-
-
-    return window.VOC_DATA.RAW_SUMMARY[period.key];
-
-
-
+    const raw = window.VOC_DATA.RAW_SUMMARY[period.key];
+    if (!isCtMode) {
+      return raw;
+    }
+    const cti = aggregateCti(period, { isChannelTalkMode: true });
+    const ctCall = cti.channelTalkTotal;
+    const delta = ctCall - raw.raw_call;
+    return Object.assign({}, raw, {
+      raw_call: ctCall,
+      total_offered_raw: raw.total_offered_raw + delta,
+      isChannelTalkMode: true
+    });
   }
 
 
@@ -1560,7 +1199,7 @@ function getRawSummary(period) {
 
 
 
-    const calls_in = cti.targetCalls;
+    const calls_in = cti.inTotal;
 
 
 
@@ -2132,39 +1771,20 @@ function claimBuckets(chats) {
 
 
 
+    // 1. 품질 클레임 우선 판정 (구글 시트 매핑 기준: 고객 여정이 '제품사용'인 건)
+  const quality = chats.filter((c) => isQualityClaim(c));
+
+  // 2. 배송 클레임: 품질 클레임이 아니면서 배송 채널/여정/태그에 해당하는 건
   const delivery = chats.filter((c) =>
-
-
-
-    c.channel === "배송접수" ||
-
-
-
-    c.journey === "배송/수령" ||
-
-
-
-    c.journey === "구매/배송" ||
-
-
-
-    c.mid === "배송" ||
-
-
-
-    (c.brand && c.brand.startsWith("배송")) ||
-
-
-
-    (c.tag && c.tag.includes("배송"))
-
-
-
+    !quality.includes(c) && (
+      c.channel === "배송접수" ||
+      c.journey === "배송/수령" ||
+      c.journey === "구매/배송" ||
+      c.mid === "배송" ||
+      (c.brand && c.brand.startsWith("배송")) ||
+      (c.tag && c.tag.includes("배송"))
+    )
   );
-
-
-
-  const quality = chats.filter((c) => !delivery.includes(c) && isQualityClaim(c));
 
 
 
@@ -2289,97 +1909,31 @@ function aggregateAlf(period) {
 
 
   // 전화 채널은 AI 상담 대상이 아니므로 순수 채팅 인입만 엄격 필터링
-
-
-
-  const chats = rawChats(period).filter((c) => c.valid && c.channel !== "전화" && c.alfInflow);
-
-
-
+  const chats = rawChats(period).filter((c) => c.valid && c.channel !== "전화" && (c.alfInflow || c.agent === "ALF (AI 상담)"));
   const totalInflow = chats.length;
 
-
-
-  const completed = chats.filter((c) => c.alfResolved);
-
-
-
-  const transferred = chats.filter((c) => !c.alfResolved);
-
-
-
-
-
-
+  // 챗봇 자체해결 판별: 상담사 미이관 상태로 완결된 건 (agent가 ALF이거나 미배정 완결)
+  const isAlfComp = (c) => c.agent === "ALF (AI 상담)" || (c.alfResolved && (!c.agent || c.agent === "미배정"));
+  const completed = chats.filter(isAlfComp);
+  const transferred = chats.filter((c) => !isAlfComp(c));
 
   const compCount = completed.length;
-
-
-
   const transCount = transferred.length;
-
-
-
   const compRate = totalInflow > 0 ? ((compCount / totalInflow) * 100).toFixed(1) : "0.0";
-
-
-
   const transRate = totalInflow > 0 ? ((transCount / totalInflow) * 100).toFixed(1) : "0.0";
 
-
-
-
-
-
-
   const csatScores = completed.map((c) => c.csat).filter((s) => s != null && s > 0);
-
-
-
   const avgCsat = csatScores.length ? (csatScores.reduce((a, b) => a + b, 0) / csatScores.length).toFixed(1) : "–";
 
-
-
-
-
-
-
   const tagMap = {};
-
-
-
   for (const c of chats) {
-
-
-
     const t = c.tag || "(미분류)";
-
-
-
     if (!tagMap[t]) {
-
-
-
       tagMap[t] = { tag: t, journey: c.journey || "–", total: 0, completed: 0, transferred: 0 };
-
-
-
     }
-
-
-
     tagMap[t].total++;
-
-
-
-    if (c.alfResolved) tagMap[t].completed++;
-
-
-
+    if (isAlfComp(c)) tagMap[t].completed++;
     else tagMap[t].transferred++;
-
-
-
   }
 
 
@@ -3298,6 +2852,7 @@ window.VOC_ENGINE = {
 
 
   ctiForWeekKey, rawCti, aggregateCti, aggregateAlf, analyzeClaimLeadtime,
+  setOutboundIncludeAbsent, getOutboundIncludeAbsent, setChannelTalkMode, getChannelTalkMode,
 
 
 

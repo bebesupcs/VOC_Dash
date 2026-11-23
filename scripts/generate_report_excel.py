@@ -41,6 +41,9 @@ from openpyxl.chart.shapes import GraphicalProperties
 from openpyxl.drawing.line import LineProperties
 from openpyxl.chart.axis import ChartLines
 from openpyxl.chart.data_source import AxDataSource, StrRef, StrData, StrVal
+from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor, AnchorMarker
+from openpyxl.drawing.xdr import XDRPositiveSize2D
+from openpyxl.utils.units import pixels_to_EMU
 
 
 DATA_JSON_PATH = Path(__file__).resolve().parent.parent / "dashboard" / "data.json"
@@ -67,6 +70,40 @@ THUMB_CACHE_DIR = Path(tempfile.gettempdir()) / "voc_photo_thumbs"
 THUMB_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def get_claim_photo_search_bases():
+    """클레임 사진이 위치할 수 있는 모든 표준 경로를 탐색하여 존재하는 디렉토리 목록을 반환"""
+    candidates = [
+        "/photos/2026",
+        "/photos",
+        "/data/9. 클레임 사진/2026",
+        "/data/9. 클레임 사진",
+        "/data/11. VOC, CCM 자료 등/9. 클레임 사진/2026",
+        "/volume1/data/11. VOC, CCM 자료 등/9. 클레임 사진/2026",
+        "/volume1/DATA/11. VOC, CCM 자료 등/9. 클레임 사진/2026",
+        r"X:\11. VOC, CCM 자료 등\9. 클레임 사진\2026",
+        r"X:\11. VOC, CCM 자료 등\1. VOC 불만접수현황\9. 클레임 사진\2026",
+        r"X:\9. 클레임 사진\2026",
+        Path(__file__).resolve().parent.parent / "claim_photos" / "2026",
+        Path(__file__).resolve().parent.parent / "claim_photos",
+        r"D:\202611백업\DATA\9. 클레임 사진\2026",
+        "/volume1/data/9. 클레임 사진/2026",
+    ]
+    existing = []
+    for c in candidates:
+        try:
+            p_str = str(c)
+            if os.path.exists(p_str) and p_str not in existing:
+                existing.append(p_str)
+                # 구글 드라이브 동기화 등으로 '2026년' 같은 연도 하위 폴더가 생긴 경우 자동 탐색
+                for sub in os.listdir(p_str):
+                    sub_p = os.path.join(p_str, sub)
+                    if os.path.isdir(sub_p) and re.match(r"^202\d(년)?$", sub) and sub_p not in existing:
+                        existing.append(sub_p)
+        except Exception:
+            pass
+    return existing or [CLAIM_PHOTOS_BASE]
+
+
 def get_claim_photo_sort_key(filename):
     label = os.path.splitext(filename)[0]
     parts = label.split("_")
@@ -85,124 +122,166 @@ def get_claim_photo_sort_key(filename):
 def find_claim_photo_folder(week_key, voc_data=None):
     """
     단일 주차 키(예: 2026-W41) 또는 특정 날짜에 매칭되는 폴더를 검색.
-    매칭되는 폴더가 없으면 (None, None) 반환 (엉뚱한 폴더로 fallback 방지).
+    실제 이미지 파일이 존재하는 폴더를 우선 반환.
     """
-    if not os.path.exists(CLAIM_PHOTOS_BASE):
-        return None, None
     if voc_data is None:
         voc_data = load_voc_data()
     weeks = voc_data.get("WEEKS", [])
-
-    dirs = [d for d in os.listdir(CLAIM_PHOTOS_BASE) if os.path.isdir(os.path.join(CLAIM_PHOTOS_BASE, d))]
-
-    # 1. 주차 키(2026-W41)로 매칭
     target_w = next((w for w in weeks if w.get("key") == week_key), None)
-    if target_w:
-        wom = target_w.get("week_of_month", "")
-        s_date = target_w.get("week_start_date", "").replace("-", "")[4:]
-        e_date = target_w.get("week_end_date", "").replace("-", "")[4:]
 
-        if wom:
+    bases = get_claim_photo_search_bases()
+    fallback_folder = None
+
+    for base in bases:
+        if not os.path.exists(base):
+            continue
+        dirs = [d for d in os.listdir(base) if os.path.isdir(os.path.join(base, d))]
+
+        matched_dirs = []
+        if target_w:
+            wom = target_w.get("week_of_month", "")
+            s_date = target_w.get("week_start_date", "").replace("-", "")[4:]
+            e_date = target_w.get("week_end_date", "").replace("-", "")[4:]
+
             for d in dirs:
-                if wom in d:
-                    return os.path.join(CLAIM_PHOTOS_BASE, d), d
-        if s_date and e_date:
-            for d in dirs:
-                if s_date in d and e_date in d:
-                    return os.path.join(CLAIM_PHOTOS_BASE, d), d
+                if (wom and wom in d) or (s_date and e_date and s_date in d and e_date in d) or (week_key and week_key in d):
+                    matched_dirs.append(d)
 
-    # 2. week_key 문자열 자체로 검색 (폴더명 직접 매칭)
-    if week_key:
-        for d in dirs:
-            if week_key in d:
-                return os.path.join(CLAIM_PHOTOS_BASE, d), d
+        for d in matched_dirs:
+            full_d = os.path.join(base, d)
+            # 이미지가 존재하는 폴더 발견 시 즉시 반환
+            imgs = [f for f in os.listdir(full_d) if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))]
+            if imgs:
+                return full_d, d
+            if fallback_folder is None:
+                fallback_folder = (full_d, d)
 
-    return None, None
+    return fallback_folder or (None, None)
 
 
 def get_all_claim_photos_for_period(period_key, voc_data=None):
     """
     주차, 월간, 분기, 연간 단위에 해당하는 모든 사진 파일 목록 및 실제 경로를 반환.
+    다중 후보 디렉토리를 전수 탐색하여 수집.
     반환: list of (full_filepath, filename, folder_name)
     """
-    if not os.path.exists(CLAIM_PHOTOS_BASE):
-        return []
     if voc_data is None:
         voc_data = load_voc_data()
 
     weeks = voc_data.get("WEEKS", [])
     months = voc_data.get("MONTHS", [])
-
     period_str = str(period_key).strip() if period_key else ""
-    dirs = [d for d in os.listdir(CLAIM_PHOTOS_BASE) if os.path.isdir(os.path.join(CLAIM_PHOTOS_BASE, d))]
 
-    target_folders = []
+    bases = get_claim_photo_search_bases()
+    collected = []
+    seen_files = set()
 
-    # 1. 연간 단위 (예: '2026', '2025', '연간')
-    if period_str in ["2026", "2025", "2027", "연간"] or (len(period_str) == 4 and period_str.isdigit()):
-        target_folders = [d for d in dirs if "주차" in d]
-        target_folders.sort()
+    # 주차 단위: 모든 bases를 순회하며 매칭되는 모든 폴더에서 사진 수집
+    if period_str.startswith("202") and "-W" in period_str:
+        target_w = next((w for w in weeks if w.get("key") == period_str), None)
+        wom = target_w.get("week_of_month", "") if target_w else ""
+        s_date = target_w.get("week_start_date", "").replace("-", "")[4:] if target_w else ""
+        e_date = target_w.get("week_end_date", "").replace("-", "")[4:] if target_w else ""
 
-    # 2. 분기 단위 (예: '2026-Q1', '2026-Q2', '2026-Q3', '2026-Q4')
-    elif "-Q" in period_str or (len(period_str) == 2 and period_str.startswith("Q")):
-        q_num = period_str.split("Q")[-1].strip()
-        q_map = {
-            "1": [1, 2, 3],
-            "2": [4, 5, 6],
-            "3": [7, 8, 9],
-            "4": [10, 11, 12]
-        }
-        for m in q_map.get(q_num, []):
-            m_flds = [d for d in dirs if re.match(rf"^{m}월\b", d)]
-            m_flds.sort()
-            target_folders.extend(m_flds)
+        for base in bases:
+            if not os.path.exists(base):
+                continue
+            dirs = [d for d in os.listdir(base) if os.path.isdir(os.path.join(base, d))]
+            for d in dirs:
+                is_match = False
+                if wom and wom in d:
+                    is_match = True
+                elif s_date and e_date and (s_date in d and e_date in d):
+                    is_match = True
+                elif period_str in d:
+                    is_match = True
 
-    # 3. 월간 단위 (예: '2026-10', '10월')
-    elif (("-" in period_str and len(period_str) == 7 and "W" not in period_str) or 
-          any(m.get("key") == period_str for m in months) or 
-          period_str.endswith("월")):
-        target_m_num = None
-        if "-" in period_str:
-            try:
-                target_m_num = int(period_str.split("-")[1].lstrip("0"))
-            except Exception:
-                pass
-        elif "월" in period_str:
-            num_part = re.sub(r"[^\d]", "", period_str)
-            if num_part:
-                target_m_num = int(num_part)
-        else:
-            m_obj = next((m for m in months if m.get("key") == period_str), None)
-            if m_obj and "-" in m_obj.get("key", ""):
-                try:
-                    target_m_num = int(m_obj["key"].split("-")[1].lstrip("0"))
-                except Exception:
-                    pass
+                if is_match:
+                    full_d = os.path.join(base, d)
+                    files = [
+                        f for f in os.listdir(full_d)
+                        if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
+                        and not f.startswith("Thumbs")
+                        and not f.endswith(".TMP")
+                    ]
+                    files.sort(key=get_claim_photo_sort_key)
+                    for fn in files:
+                        key = (d, fn)
+                        if key not in seen_files:
+                            seen_files.add(key)
+                            collected.append((os.path.join(full_d, fn), fn, d))
 
-        if target_m_num is not None:
-            target_folders = [d for d in dirs if re.match(rf"^{target_m_num}월\b", d)]
+        if collected:
+            return collected
+
+    for base in bases:
+        if not os.path.exists(base):
+            continue
+        dirs = [d for d in os.listdir(base) if os.path.isdir(os.path.join(base, d))]
+        target_folders = []
+
+        # 1. 연간 단위
+        if period_str in ["2026", "2025", "2027", "연간"] or (len(period_str) == 4 and period_str.isdigit()):
+            target_folders = [d for d in dirs if ("주차" in d or "주(" in d)]
             target_folders.sort()
 
-    # 4. 주차 단위 (예: '2026-W41')
-    else:
-        f_path, f_name = find_claim_photo_folder(period_str, voc_data)
-        if f_name:
-            target_folders = [f_name]
+        # 2. 분기 단위
+        elif "-Q" in period_str or (len(period_str) == 2 and period_str.startswith("Q")):
+            q_num = period_str.split("Q")[-1].strip()
+            q_map = {"1": [1, 2, 3], "2": [4, 5, 6], "3": [7, 8, 9], "4": [10, 11, 12]}
+            for m in q_map.get(q_num, []):
+                m_flds = [d for d in dirs if re.match(rf"^{m}월\b", d)]
+                m_flds.sort()
+                target_folders.extend(m_flds)
 
-    collected = []
-    for fld in target_folders:
-        full_dir = os.path.join(CLAIM_PHOTOS_BASE, fld)
-        if not os.path.exists(full_dir):
-            continue
-        files = [
-            f for f in os.listdir(full_dir)
-            if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
-            and not f.startswith("Thumbs")
-            and not f.endswith(".TMP")
-        ]
-        files.sort(key=get_claim_photo_sort_key)
-        for fn in files:
-            collected.append((os.path.join(full_dir, fn), fn, fld))
+        # 3. 월간 단위
+        elif (("-" in period_str and len(period_str) == 7 and "W" not in period_str) or 
+              any(m.get("key") == period_str for m in months) or 
+              period_str.endswith("월")):
+            target_m_num = None
+            if "-" in period_str:
+                try:
+                    target_m_num = int(period_str.split("-")[1].lstrip("0"))
+                except Exception:
+                    pass
+            elif "월" in period_str:
+                num_part = re.sub(r"[^\d]", "", period_str)
+                if num_part:
+                    target_m_num = int(num_part)
+            else:
+                m_obj = next((m for m in months if m.get("key") == period_str), None)
+                if m_obj and "-" in m_obj.get("key", ""):
+                    try:
+                        target_m_num = int(m_obj["key"].split("-")[1].lstrip("0"))
+                    except Exception:
+                        pass
+
+            if target_m_num is not None:
+                target_folders = [d for d in dirs if re.match(rf"^{target_m_num}월\b", d)]
+                target_folders.sort()
+
+        # 4. 기타
+        else:
+            for d in dirs:
+                if period_str in d:
+                    target_folders.append(d)
+
+        for fld in target_folders:
+            full_dir = os.path.join(base, fld)
+            if not os.path.exists(full_dir):
+                continue
+            files = [
+                f for f in os.listdir(full_dir)
+                if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
+                and not f.startswith("Thumbs")
+                and not f.endswith(".TMP")
+            ]
+            files.sort(key=get_claim_photo_sort_key)
+            for fn in files:
+                key = (fld, fn)
+                if key not in seen_files:
+                    seen_files.add(key)
+                    collected.append((os.path.join(full_dir, fn), fn, fld))
 
     return collected
 
@@ -246,8 +325,15 @@ def read_claim_photo_bytes(folder_name, file_name, is_thumb=False):
         return None, None
     safe_folder = os.path.basename(folder_name)
     safe_file = os.path.basename(file_name)
-    full_path = os.path.join(CLAIM_PHOTOS_BASE, safe_folder, safe_file)
-    if not os.path.exists(full_path):
+
+    full_path = None
+    for base in get_claim_photo_search_bases():
+        cand = os.path.join(base, safe_folder, safe_file)
+        if os.path.exists(cand):
+            full_path = cand
+            break
+
+    if not full_path or not os.path.exists(full_path):
         return None, None
 
     if is_thumb and PILImage is not None:
@@ -299,6 +385,78 @@ def get_sqlite_conn():
     return None
 
 
+_DB_ORDER_MAP_CACHE = None
+
+def get_db_order_info_map():
+    global _DB_ORDER_MAP_CACHE
+    if _DB_ORDER_MAP_CACHE is not None:
+        return _DB_ORDER_MAP_CACHE
+    order_map = {}
+    conn = get_sqlite_conn()
+    if conn:
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id, order_no, shipment_type, invoice_no 
+                FROM fact_voc 
+                WHERE (order_no IS NOT NULL AND order_no != '')
+                   OR (shipment_type IS NOT NULL AND shipment_type != '')
+                   OR (invoice_no IS NOT NULL AND invoice_no != '')
+            """)
+            for r in cur.fetchall():
+                cid = str(r[0])
+                order_map[cid] = {
+                    "order_no": (r[1] or "").strip(),
+                    "shipment_type": (r[2] or "").strip(),
+                    "invoice_no": (r[3] or "").strip()
+                }
+        except Exception as e:
+            print("[Warning] Failed to fetch order info map from fact_voc:", e)
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    _DB_ORDER_MAP_CACHE = order_map
+    return _DB_ORDER_MAP_CACHE
+
+
+_DB_SHIPMENT_PROD_MAP_CACHE = None
+
+def get_db_shipment_product_map():
+    global _DB_SHIPMENT_PROD_MAP_CACHE
+    if _DB_SHIPMENT_PROD_MAP_CACHE is not None:
+        return _DB_SHIPMENT_PROD_MAP_CACHE
+    prod_map = {}
+    conn = get_sqlite_conn()
+    if conn:
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT claim_key, original_invoice_no, product_name 
+                FROM shipment_claims 
+                WHERE product_name IS NOT NULL AND product_name != ''
+            """)
+            for r in cur.fetchall():
+                ckey = str(r[0] or "").strip()
+                inv = str(r[1] or "").strip()
+                pname = str(r[2] or "").strip()
+                if ckey:
+                    prod_map[ckey] = pname
+                if inv:
+                    prod_map[inv] = pname
+        except Exception as e:
+            print("[Warning] Failed to fetch shipment product map from shipment_claims:", e)
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    _DB_SHIPMENT_PROD_MAP_CACHE = prod_map
+    return _DB_SHIPMENT_PROD_MAP_CACHE
+
+
+
 def is_qc_chat(c):
     if not c or not c.get("valid"):
         return False
@@ -309,6 +467,8 @@ def is_qc_chat(c):
 
 def is_delivery_chat(c):
     if not c or not c.get("valid"):
+        return False
+    if is_qc_chat(c):
         return False
     return (
         c.get("channel") == "배송접수"
@@ -330,18 +490,23 @@ def is_svc_chat(c):
 def format_insight_text(insight_val, default_text):
     """
     대시보드에서 전달되는 다양한 형태의 인사이트 데이터를 안전하게 문자열로 변환.
-    - 문자열인 경우 그대로 활용 (필요시 머리말 보정)
-    - 리스트 형태(UI v2 모델: [{text, author, date}, ...])인 경우 텍스트를 추출하여 줄바꿈으로 연결
-    - 딕셔너리인 경우 텍스트 및 작성자 메타데이터 추출
-    - 비어있을 경우 default_text 반환
+    - 타이틀 '📌 [이슈 코멘트 & 액션 플랜]' 출력 후 한 칸 띄워서(\n\n) 본문 코멘트 배치
     """
+    title_header = "📌 [이슈 코멘트 & 액션 플랜]"
+
     if not insight_val:
-        return default_text
+        if default_text.startswith(title_header):
+            body = default_text[len(title_header):].strip()
+            return f"{title_header}\n\n{body}"
+        return f"{title_header}\n\n{default_text.strip()}"
+
     if isinstance(insight_val, str) and insight_val.strip():
         txt = insight_val.strip()
-        if not txt.startswith("📌"):
-            txt = f"📌 [이슈 코멘트 & 액션 플랜] {txt}"
-        return txt
+        if txt.startswith(title_header):
+            body = txt[len(title_header):].strip()
+            return f"{title_header}\n\n{body}"
+        return f"{title_header}\n\n{txt}"
+
     if isinstance(insight_val, list) and len(insight_val) > 0:
         lines = []
         for item in insight_val:
@@ -350,39 +515,47 @@ def format_insight_text(insight_val, default_text):
                 a = item.get("author") or item.get("user") or ""
                 d = item.get("date") or item.get("created_at") or ""
                 meta = f" ({a} | {d})" if a or d else ""
-                if t:
-                    lines.append(f"📌 [이슈 코멘트 & 액션 플랜] {t}{meta}")
+                if t.strip():
+                    lines.append(f"{t.strip()}{meta}")
             elif isinstance(item, str) and item.strip():
-                lines.append(f"📌 [이슈 코멘트 & 액션 플랜] {item.strip()}")
+                lines.append(item.strip())
         if lines:
-            return "\n".join(lines)
+            body_content = "\n\n".join(lines)
+            return f"{title_header}\n\n{body_content}"
+
     if isinstance(insight_val, dict):
         t = insight_val.get("text") or insight_val.get("content") or ""
         a = insight_val.get("author") or insight_val.get("user") or ""
         d = insight_val.get("date") or insight_val.get("created_at") or ""
         meta = f" ({a} | {d})" if a or d else ""
-        if t:
-            return f"📌 [이슈 코멘트 & 액션 플랜] {t}{meta}"
-    return default_text
+        if t.strip():
+            return f"{title_header}\n\n{t.strip()}{meta}"
+
+    if default_text.startswith(title_header):
+        body = default_text[len(title_header):].strip()
+        return f"{title_header}\n\n{body}"
+    return f"{title_header}\n\n{default_text.strip()}"
 
 
-def calc_comment_box_height(text, char_limit=58, line_height=20, min_height=45, padding=16):
+def calc_comment_box_height(text, char_limit=56, text_line_height=15.0, blank_line_height=8.0, min_height=32, padding=20):
     """
-    엑셀 병합 셀에서 텍스트 줄바꿈 시 글자가 잘리지 않도록 행 높이를 정밀 계산.
-    - 한글(전각) 2단위, 영문/숫자(반각) 1단위 가중치 반영
-    - 문단별 래핑 줄 수와 전체 시각적 줄 수 합산하여 넉넉한 상하 패딩 확보
+    엑셀 병합 셀에서 텍스트 줄바꿈 시 글자가 잘리지 않고,
+    너무 빽빽하거나 과도하게 비어있지 않도록 쾌적한 호흡 여백을 정밀 계산.
+    - 본문 텍스트 라인: 9pt 폰트 기준 약 15.0pt
+    - 문단 간 빈 줄(\n\n): 약 8.0pt
+    - 상하 여백(padding): 20.0pt (하단에 약 1줄 분량의 정갈한 여백 확보)
     """
     if not text:
         return min_height
-    total_lines = 0
+    total_h = padding
     for para in str(text).splitlines():
         if not para.strip():
-            total_lines += 1
+            total_h += blank_line_height
             continue
         w = sum(2 if ord(c) > 127 else 1 for c in para)
         lines = max(1, math.ceil(w / (char_limit * 2)))
-        total_lines += lines
-    return max(min_height, total_lines * line_height + padding)
+        total_h += lines * text_line_height
+    return max(min_height, int(round(total_h)))
 
 
 def load_clean_quality_raw(cur_week, voc_data):
@@ -393,6 +566,7 @@ def load_clean_quality_raw(cur_week, voc_data):
     """
     override_file = os.path.join(os.path.dirname(__file__), "..", "dashboard", "compensation_overrides.json")
     excluded_ids = set()
+    included_ids = set()
     excluded_reasons_map = {}
     manual_additions = []
     if os.path.exists(override_file):
@@ -400,6 +574,7 @@ def load_clean_quality_raw(cur_week, voc_data):
             with open(override_file, "r", encoding="utf-8") as f:
                 ov_data = json.load(f)
                 excluded_ids = set(str(x) for x in ov_data.get("excluded_ids", []))
+                included_ids = set(str(x) for x in ov_data.get("included_ids", []))
                 excluded_reasons_map = ov_data.get("excluded_reasons", {})
                 manual_additions = ov_data.get("manual_additions", [])
         except Exception as e:
@@ -410,37 +585,63 @@ def load_clean_quality_raw(cur_week, voc_data):
 
     raw_records = []
     chats_by_week = voc_data.get("CHATS_BY_WEEK", {})
+    db_order_map = get_db_order_info_map()
 
     for wk_key, clist in chats_by_week.items():
         w_obj = week_map.get(wk_key, {})
         for c in clist:
-            if not is_qc_chat(c):
-                continue
             cid = str(c.get("id") or "")
             sp_note = str(c.get("note") or "").strip()
-            is_manual_excluded = (cid in excluded_ids) or ("제외" in sp_note) or ("미신청" in sp_note)
-            is_comp = not is_manual_excluded
-            ex_reason = ""
-            if is_manual_excluded:
-                ex_obj = excluded_reasons_map.get(cid)
-                if isinstance(ex_obj, dict):
-                    ex_reason = ex_obj.get("reason", "관리자 수기 제외")
-                elif isinstance(ex_obj, str):
-                    ex_reason = ex_obj
-                elif "제외" in sp_note or "미신청" in sp_note:
-                    ex_reason = f"특이사항 메모 ({sp_note})"
-                else:
-                    ex_reason = "관리자 수기 제외"
-
-            raw_mgr = str(c.get("agent") or "AI")
-            clean_mgr = re.sub(r'[\U00010000-\U0010ffff]', '', raw_mgr).replace("CX_", "").replace("CX", "").strip() or "AI"
-            cust_val = c.get("custName") or c.get("cust") or "고객"
 
             date_str = c.get("date") or ""
             if not date_str and c.get("time"):
                 date_str = str(c.get("time"))[:10]
             if not date_str:
                 date_str = w_obj.get("week_start_date", "")
+
+            # 11월부터는 상담 설명의 보상취합 O, X 확인
+            comp_flag = None
+            inflow_check_date = date_str or str(c.get("time") or "")[:10]
+            if inflow_check_date >= "2026-11-01":
+                raw_text = f"{sp_note} {c.get('issue') or ''} {c.get('act') or ''} {c.get('desc') or ''}"
+                m_comp = re.search(r'보상취합\s*[:：]\s*([OXox])', raw_text)
+                if m_comp:
+                    comp_flag = m_comp.group(1).upper()
+
+            # 품질 클레임 모수: 고객 여정(journey)이 '제품사용'인 건만 대상 (사용자 절대 기준)
+            if not is_qc_chat(c):
+                continue
+
+            # 1. 수기 포함/복원 오버라이드 최우선 (관리자가 '보상 다시 추가' 누른 건)
+            if cid in included_ids:
+                is_comp = True
+                ex_reason = ""
+            # 2. 수기 제외 오버라이드 최우선 (관리자가 '보상 제외' 누른 건)
+            elif cid in excluded_ids:
+                is_comp = False
+                ex_obj = excluded_reasons_map.get(cid)
+                if isinstance(ex_obj, dict):
+                    ex_reason = ex_obj.get("reason", "관리자 수기 제외")
+                elif isinstance(ex_obj, str):
+                    ex_reason = ex_obj
+                else:
+                    ex_reason = "관리자 수기 제외"
+            elif comp_flag == "X":
+                is_comp = False
+                ex_reason = "상담 설명 보상취합 X"
+            elif comp_flag == "O":
+                is_comp = True
+                ex_reason = ""
+            elif ("제외" in sp_note) or ("미신청" in sp_note):
+                is_comp = False
+                ex_reason = f"특이사항 메모 ({sp_note})"
+            else:
+                is_comp = True
+                ex_reason = ""
+
+            raw_mgr = str(c.get("agent") or "AI")
+            clean_mgr = re.sub(r'[\U00010000-\U0010ffff]', '', raw_mgr).replace("CX_", "").replace("CX", "").strip() or "AI"
+            cust_val = c.get("custName") or c.get("cust") or "고객"
 
             wom = w_obj.get("week_of_month") or c.get("week_of_month", "")
             w_match = re.search(r'(\d+)주', wom)
@@ -466,6 +667,21 @@ def load_clean_quality_raw(cur_week, voc_data):
             else:
                 report_m_str = m_str
 
+            db_info = db_order_map.get(cid, {})
+            ord_no = c.get("orderNo") or c.get("orderId") or db_info.get("order_no", "")
+            ship_type = c.get("shipmentType") or c.get("shipType") or db_info.get("shipment_type", "")
+            inv_no = c.get("invoice") or c.get("invoiceNo") or db_info.get("invoice_no", "")
+
+            channel_str = c.get("channel") or "채팅"
+            raw_dir = c.get("direction") or ""
+            if raw_dir in ("INBOUND", "인바운드"):
+                direction_str = "인바운드"
+            elif raw_dir in ("OUTBOUND", "아웃바운드"):
+                direction_str = "아웃바운드"
+            else:
+                direction_str = "아웃바운드" if "발신" in channel_str else "인바운드"
+            act_str = c.get("act") or c.get("action") or ""
+
             raw_records.append({
                 "year": str(w_obj.get("year") or c.get("year") or "2026"),
                 "quarter": q_str,
@@ -478,22 +694,25 @@ def load_clean_quality_raw(cur_week, voc_data):
                 "time": inflow_time,
                 "date": date_str,
                 "mgr": clean_mgr,
-                "tagA": c.get("brand") or "",
+                "channel": channel_str,
+                "direction": direction_str,
+                "tagA": c.get("brand") or "클레임(공통)",
                 "tagB": c.get("mid") or "",
                 "tagC": c.get("sub") or "",
                 "prod": c.get("prod") or "기타",
                 "mfg": c.get("mfgDate") or c.get("mfg") or "",
                 "issue": c.get("issue") or "",
+                "act": act_str,
                 "journey": c.get("journey") or "제품사용",
                 "qualitySend": c.get("qSend") or "X",
                 "isComp": is_comp,
                 "exReason": ex_reason,
-                "compMonth": "O" if is_comp else "",
-                "compAll": "O" if is_comp else "",
+                "compMonth": "O" if is_comp else "X",
+                "compAll": "O" if is_comp else "X",
                 "mall": c.get("mall") or "",
-                "orderNo": c.get("orderId") or "",
-                "shipmentType": c.get("shipType") or "",
-                "invoice": c.get("invoice") or "",
+                "orderNo": ord_no,
+                "shipmentType": ship_type,
+                "invoice": inv_no,
                 "weekKey": wk_key
             })
 
@@ -541,6 +760,7 @@ def load_clean_service_raw(cur_week, voc_data):
 
     raw_records = []
     chats_by_week = voc_data.get("CHATS_BY_WEEK", {})
+    db_order_map = get_db_order_info_map()
 
     for wk_key, clist in chats_by_week.items():
         w_obj = week_map.get(wk_key, {})
@@ -582,32 +802,55 @@ def load_clean_service_raw(cur_week, voc_data):
             else:
                 direction_str = "아웃바운드" if "발신" in channel_str else "인바운드"
 
+            db_info = db_order_map.get(cid, {})
+            ord_no = c.get("orderNo") or c.get("orderId") or db_info.get("order_no", "")
+            ship_type = c.get("shipmentType") or c.get("shipType") or db_info.get("shipment_type", "")
+            inv_no = c.get("invoice") or c.get("invoiceNo") or db_info.get("invoice_no", "")
+
+            inflow_time = str(c.get("time") or c.get("managedAt") or "")
+            if len(inflow_time) >= 7 and inflow_time[4] == "-":
+                report_m_str = f"{int(inflow_time[5:7])}월"
+            elif date_str and len(date_str) >= 7 and date_str[4] == "-":
+                report_m_str = f"{int(date_str[5:7])}월"
+            else:
+                report_m_str = m_str
+
+            raw_tag_str = str(c.get("tag") or "").strip()
+            orig_tag_a = raw_tag_str.split("/")[0].strip() if raw_tag_str else (c.get("brand") or "클레임(공통)")
+
             raw_records.append({
                 "year": str(w_obj.get("year") or c.get("year") or "2026"),
                 "quarter": q_str,
+                "reportMonth": report_m_str,
                 "month": m_str,
                 "week": w_str,
                 "mw": mw,
                 "id": cid,
                 "cust": cust_val,
+                "time": inflow_time,
                 "date": date_str,
                 "mgr": clean_mgr,
                 "channel": channel_str,
                 "direction": direction_str,
+                "tagA": orig_tag_a,
                 "tagB": c.get("mid") or "",
                 "tagC": c.get("sub") or "",
                 "prod": c.get("prod") or "",
+                "mfg": c.get("mfgDate") or c.get("mfg") or "",
                 "issue": c.get("issue") or "",
                 "act": c.get("act") or c.get("action") or "",
+                "qualitySend": c.get("qSend") or c.get("qualitySend") or "X",
                 "mall": c.get("mall") or "",
-                "time": c.get("time") or "",
+                "orderNo": ord_no,
+                "shipmentType": ship_type,
+                "invoice": inv_no,
                 "weekKey": wk_key
             })
 
     return raw_records
 
 
-def build_report_excel(target_period_key=None, memos=None, insights=None):
+def build_report_excel(target_period_key=None, memos=None, insights=None, include_missed=False):
     voc_data = load_voc_data()
     weeks = voc_data.get("WEEKS", [])
     quarters = voc_data.get("QUARTERS", [])
@@ -615,6 +858,19 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
     months = voc_data.get("MONTHS", [])
     if not weeks:
         raise ValueError("No WEEKS metadata in voc_data")
+
+    # 서버에 저장된 카테고리 인사이트 파일 자동 로드 (인자가 비어있을 경우 폴백)
+    if not insights:
+        ins_file = os.path.join(os.path.dirname(__file__), "..", "dashboard", "voc_cat_insights.json")
+        if os.path.exists(ins_file):
+            try:
+                with open(ins_file, "r", encoding="utf-8") as f:
+                    all_cat_ins = json.load(f)
+                    p_key = str(target_period_key) if target_period_key else (weeks[-1]["key"] if weeks else "")
+                    if p_key in all_cat_ins:
+                        insights = all_cat_ins[p_key]
+            except Exception:
+                pass
 
     # 기간 유형 판별 (주간 / 월간 / 분기 / 연간)
     is_month = False
@@ -765,8 +1021,8 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
     def make_pillar_chart(min_row, max_row, colors, y_unit=5, y_max=None):
         """
         사용자 요구사항 반영 클러스터 기둥 차트:
-        - 가로 전폭 (28.5cm: A~F열 여백 없이 꽉 채움)
-        - 세로 슬림화 (7.5cm: 컴팩트한 비주얼)
+        - 가로 전폭 (27.8cm: 확장된 A~F열 너비와 1:1 완벽 일치)
+        - 세로 슬림화 (6.8cm: 컴팩트한 비주얼 및 하단 테이블 침범 방지)
         - 눈금선: 3~4개 선 유지 (과도한 눈금 배제)
         """
         c = BarChart()
@@ -774,8 +1030,8 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
         c.grouping = "clustered"
         c.overlap = 0
         c.gapWidth = 120
-        c.width = 28.5
-        c.height = 7.5
+        c.width = 27.8
+        c.height = 7.2
         c.title = None
         c.legend.position = "t"
         c.legend.legendPos = "t"
@@ -838,10 +1094,10 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
     # =============================================================
     ws_rep = wb.active
     ws_rep.title = "VOC_분석종합리포트"
-    ws_rep.views.sheetView[0].showGridLines = True
+    ws_rep.views.sheetView[0].showGridLines = False # 엑셀 보기 - 눈금선 체크박스 해제 (프로페셔널 보고서 모드)
 
-    # 컬럼 너비 설정 (A~F열: 여백 줄이고 눈에 잘 띄도록 가독성 최적화)
-    col_widths = {"A": 10, "B": 28, "C": 15, "D": 22, "E": 16, "F": 28}
+    # 컬럼 너비 설정 (A열을 28로 대폭 확장하여 텍스트 잘림 방지, A~F 전폭 균형 최적화)
+    col_widths = {"A": 28, "B": 20, "C": 15, "D": 18, "E": 16, "F": 27}
     for col_letter, width in col_widths.items():
         ws_rep.column_dimensions[col_letter].width = width
 
@@ -978,33 +1234,41 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
         if not p: return 0, 0, 0, 0
         pk = str(p.get("key", ""))
         is_w = "W" in pk
-        if is_w:
-            rs = raw_summary.get(pk)
-            if rs:
-                c = rs.get("raw_call", 0)
-                ch = rs.get("raw_chat", 0)
-                b = rs.get("raw_board", 0)
-                return c, ch, b, rs.get("total_offered_raw", c + ch + b)
         p_c = get_chats_for_p(p)
         p_cti = get_cti_for_p(p)
-        in_target_reasons = [
-            "응대 가능 상담원 없음", "상담원 수신 거절", "대기열 최대 대기시간 초과",
-            "링 울리는 시간 초과", "최대 대기열 수 초과", "링 울리는 중 고객 종료",
-            "음성 사서함", "고객이 먼저 끊었을 때"
-        ]
-        calls_in = sum(1 for c in p_cti if c.get("dir") in ["inbound", "missed"] and (
-            c.get("ans") == 1 or 
-            (c.get("reason") in in_target_reasons) or 
-            (c.get("reason") == "대기열에서 고객 종료" and c.get("is_in_hours"))
-        ))
-        calls_out = sum(1 for c in p_cti if c.get("dir") == "outbound" and c.get("ans") == 1 and "부재" not in (c.get("tag") or "") and "부재" not in (c.get("reason") or ""))
-        tot_calls = calls_in + calls_out
+        
+        # 1. 채팅 건수 (상담사챗 + 챗봇)
         tot_chat = sum(1 for c in p_c if c.get("channel") in ["채팅", "상담사챗", "챗봇(ALF)"] and c.get("channel") != "배송접수")
+        
+        # 2. 게시판 건수
         board_by_week = voc_data.get("BOARD_COUNT_BY_WEEK", {})
         if p.get("weekKeys"):
             tot_board = sum(board_by_week.get(wk, 0) for wk in p["weekKeys"])
         else:
             tot_board = board_by_week.get(pk, 0)
+
+        # 3. 전화(콜) 건수: include_missed 토글 연동!
+        in_target_reasons = [
+            "응대 가능 상담원 없음", "상담원 수신 거절", "대기열 최대 대기시간 초과",
+            "링 울리는 시간 초과", "최대 대기열 수 초과", "링 울리는 중 고객 종료",
+            "음성 사서함", "고객이 먼저 끊었을 때"
+        ]
+
+        inAns = sum(1 for c in p_cti if c.get("dir") in ["inbound", "missed"] and c.get("ans") == 1)
+        inTargetMissed = sum(1 for c in p_cti if c.get("dir") in ["inbound", "missed"] and c.get("ans") != 1 and (
+            (c.get("reason") in in_target_reasons) or (c.get("reason") == "대기열에서 고객 종료" and c.get("is_in_hours"))
+        ))
+        outAllAns = sum(1 for c in p_cti if c.get("dir") == "outbound" and c.get("ans") == 1)
+        outAllMiss = sum(1 for c in p_cti if c.get("dir") == "outbound" and c.get("ans") != 1)
+        outPureAns = sum(1 for c in p_cti if c.get("dir") == "outbound" and c.get("ans") == 1 and "부재" not in (c.get("tag") or "") and "부재" not in (c.get("reason") or ""))
+
+        if include_missed:
+            # [부재 포함 ON: 채널톡 공식 모드 (수신 성공 + 대기열 부재 + 발신 전체)]
+            tot_calls = inAns + inTargetMissed + outAllAns + outAllMiss
+        else:
+            # [부재 포함 OFF: 순수 실통화 모드 (수신 성공 + 발신 순수 실통화)]
+            tot_calls = inAns + outPureAns
+
         tot_all = tot_calls + tot_chat + tot_board
         return tot_calls, tot_chat, tot_board, tot_all
 
@@ -1130,8 +1394,8 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
     ws_data.views.sheetView[0].showGridLines = True
 
     # 표 1: 채널별 인입 추이 (Row 1 ~ 6)
-    ws_data.cell(row=1, column=1, value="[표 1] 채널별 인입 실적 & 최근 4주 추이 데이터").font = font_bold
-    chan_headers = ["운영주차", "전화 (콜)", "채팅 (상담사/챗봇)", "게시판 (스토어/몰)", "전체 VOC 인입량 (Total)"]
+    chan_call_title = "전화 (콜 - 채널톡 공식)" if include_missed else "전화 (콜 - 순수 실통화)"
+    chan_headers = ["운영주차", chan_call_title, "채팅 (상담사/챗봇)", "게시판 (스토어/몰)", "전체 VOC 인입량 (Total)"]
     for ci, h in enumerate(chan_headers, 1):
         cell = ws_data.cell(row=2, column=ci, value=h)
         cell.font = font_tbl_h; cell.fill = fill_slate_header; cell.alignment = Alignment(vertical="center", horizontal="center"); cell.border = border_thin
@@ -1229,8 +1493,9 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
     prv_contact = (prv_calls + prv_chat) if prev_week_keys else None
 
     # 대시보드와 동일 공식: 전화 + 채팅 실응대 인입량 대비 클레임 비율 산출
+    tot_kpi_label = "총 인입 전수 (채널톡 공식)" if include_missed else "총 인입 전수 (순수 실통화)"
     kpi_items = [
-        ("총 인입 전수 (공식 Total)", cur_tot, prv_tot, "100.0%"),
+        (tot_kpi_label, cur_tot, prv_tot, "100.0%"),
         ("품질 클레임 (전화·채팅 대비)", q_cur_cnt, q_prv_cnt, f"{(q_cur_cnt/cur_contact*100):.1f}%" if cur_contact else "0%"),
         ("배송 클레임 (전화·채팅 대비)", d_cur_cnt, d_prv_cnt, f"{(d_cur_cnt/cur_contact*100):.1f}%" if cur_contact else "0%"),
         ("서비스 클레임 (전화·채팅 대비)", s_cur_cnt, s_prv_cnt, f"{(s_cur_cnt/cur_contact*100):.1f}%" if cur_contact else "0%"),
@@ -1248,11 +1513,9 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
         for ci, cell in enumerate([c1, c2, c3, c4, c5, c6], 1):
             cell.font = font_bold if is_first == 0 else font_regular
             cell.border = border_thin
-            if ci == 1: cell.alignment = Alignment(vertical="center", horizontal="left", indent=1)
-            elif ci in (2, 3): 
-                cell.alignment = Alignment(vertical="center", horizontal="right")
+            cell.alignment = Alignment(vertical="center", horizontal="center")
+            if ci in (2, 3): 
                 if isinstance(cell.value, (int, float)): cell.number_format = "#,##0"
-            else: cell.alignment = Alignment(vertical="center", horizontal="center")
 
         if is_first == 0:
             apply_box(ws_rep, row_idx, 1, row_idx, 6, fill_total, border_thin)
@@ -1266,14 +1529,14 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
     ws_rep.row_dimensions[row_idx].height = 24
     row_idx += 1
 
-    # [차트 1: 채널별 추이 복합 차트 - 전폭 28.5cm, 슬림 높이 7.5cm, 눈금선 3선]
+    # [차트 1: 채널별 추이 복합 차트 - 전폭 24.6cm, 슬림 높이 7.2cm, 헤드룸 확보]
     chart_chan = BarChart()
     chart_chan.type = "col"
     chart_chan.grouping = "clustered"
     chart_chan.overlap = 0
     chart_chan.gapWidth = 110
-    chart_chan.width = 28.5
-    chart_chan.height = 7.5
+    chart_chan.width = 27.8
+    chart_chan.height = 7.2
     chart_chan.title = None
     chart_chan.legend.position = "t"
     chart_chan.legend.legendPos = "t"
@@ -1289,9 +1552,10 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
     chart_chan.y_axis.axPos = "l"
     chart_chan.y_axis.tickLblPos = "nextTo"
 
-    # Y축 눈금선: 데이터 규모에 맞춰 최적 스케일링
+    # Y축 눈금선: 라인 차트 레이블과 범례가 겹치지 않도록 25% 헤드룸 부여
     max_tot = max([r[4] for r in channel_recent_data] + [1000])
-    y_max = ((max_tot // 500) + 1) * 500 if max_tot < 5000 else ((max_tot // 2000) + 1) * 2000
+    target_max = int(max_tot * 1.25)
+    y_max = ((target_max // 500) + 1) * 500 if target_max < 5000 else ((target_max // 2000) + 1) * 2000
     chart_chan.y_axis.scaling.min = 0
     chart_chan.y_axis.scaling.max = y_max
     chart_chan.y_axis.majorUnit = y_max // 2 if y_max >= 1000 else 250
@@ -1352,7 +1616,9 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
 
     chart_chan += line_tot
     ws_rep.add_chart(chart_chan, f"A{row_idx}")
-    row_idx += 16 # 차트 크기에 딱 맞춘 행 오프셋 (불필요한 세로 여백 제거)
+    for r in range(row_idx, row_idx + 14):
+        ws_rep.row_dimensions[r].height = 18
+    row_idx += 14
 
     # 채널별 상세 테이블
     recent_labels = [r[0] + (" (현재)" if i == len(channel_recent_data)-1 else "") for i, r in enumerate(channel_recent_data)]
@@ -1364,15 +1630,15 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
     row_idx += 1
 
     chan_rows = [
-        ("전화 (인바운드)", [r[1] for r in channel_recent_data]),
-        ("채팅 (인 & 아웃)", [r[2] for r in channel_recent_data]),
+        (chan_call_title, [r[1] for r in channel_recent_data]),
+        ("채팅 (상담사 & 챗봇)", [r[2] for r in channel_recent_data]),
         ("게시판 (스토어/자사몰)", [r[3] for r in channel_recent_data]),
     ]
     cur_tot_val = channel_recent_data[-1][4] if channel_recent_data else 1
     for ch_name, counts in chan_rows:
         ws_rep.row_dimensions[row_idx].height = 20
         c1 = ws_rep.cell(row=row_idx, column=1, value=ch_name)
-        c1.font = font_regular; c1.alignment = Alignment(vertical="center", horizontal="left", indent=1); c1.border = border_thin
+        c1.font = font_regular; c1.alignment = Alignment(vertical="center", horizontal="center"); c1.border = border_thin
         for ci, cnt in enumerate(counts, 2):
             cell = ws_rep.cell(row=row_idx, column=ci, value=cnt)
             cell.font = font_regular; cell.alignment = Alignment(vertical="center", horizontal="center"); cell.border = border_thin; cell.number_format = "#,##0"
@@ -1391,42 +1657,114 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
     c_tot_sh = ws_rep.cell(row=row_idx, column=len(channel_recent_data) + 2, value="100.0%")
     c_tot_sh.font = font_bold; c_tot_sh.alignment = Alignment(vertical="center", horizontal="center"); c_tot_sh.border = border_thin
     apply_box(ws_rep, row_idx, 1, row_idx, len(chan_tbl_headers), fill_total, border_thin)
-    row_idx += 2
+    row_idx += 1
 
-    # 2.5 [신규] AI 상담(ALF 챗봇) 처리율 코멘트 배너 (웹 대시보드와 동일 배치)
-    cur_alf_chats = [c for c in get_chats_for_p(period_obj) if c.get("valid") and c.get("channel") != "전화" and c.get("alfInflow")]
+    # 2.5 [신규] AI 상담(ALF 챗봇) 응대 현황 (KPI 카드형 요약 테이블)
+    def is_alf_comp(c):
+        agent = str(c.get("agent") or "").strip()
+        return agent in ("ALF (AI 상담)", "ALF") or (c.get("alfResolved") and (not agent or agent == "미배정"))
+
+    cur_alf_chats = [c for c in get_chats_for_p(period_obj) if c.get("valid") and c.get("channel") != "전화" and (c.get("alfInflow") or c.get("agent") == "ALF (AI 상담)")]
     alf_inflow = len(cur_alf_chats)
-    alf_comp = len([c for c in cur_alf_chats if c.get("alfResolved")])
+    alf_comp = len([c for c in cur_alf_chats if is_alf_comp(c)])
     alf_trans = alf_inflow - alf_comp
     alf_rate = (alf_comp / alf_inflow * 100) if alf_inflow > 0 else 0.0
 
-    prev_alf_chats = [c for c in get_chats_for_p(prev_period_obj) if c.get("valid") and c.get("channel") != "전화" and c.get("alfInflow")] if prev_period_obj else []
+    prev_alf_chats = [c for c in get_chats_for_p(prev_period_obj) if c.get("valid") and c.get("channel") != "전화" and (c.get("alfInflow") or c.get("agent") == "ALF (AI 상담)")] if prev_period_obj else []
     prev_alf_inflow = len(prev_alf_chats)
-    prev_alf_comp = len([c for c in prev_alf_chats if c.get("alfResolved")])
+    prev_alf_comp = len([c for c in prev_alf_chats if is_alf_comp(c)])
+    prev_alf_trans = prev_alf_inflow - prev_alf_comp
     prev_alf_rate = (prev_alf_comp / prev_alf_inflow * 100) if prev_alf_inflow > 0 else None
 
+    # 발신(선톡) 건수
+    cur_p_chats = [c for c in get_chats_for_p(period_obj) if c.get("valid")]
+    out_chats_count = sum(1 for c in cur_p_chats if c.get("channel") in ["채팅", "상담사챗", "챗봇(ALF)"] and str(c.get("direction") or "INBOUND").upper() == "OUTBOUND")
+    out_note = f" (발신/선톡 {out_chats_count}건 별도)" if out_chats_count > 0 else ""
+
+    font_rose_alf = Font(name="맑은 고딕", size=9, bold=True, color="DC2626")
+    font_teal_alf = Font(name="맑은 고딕", size=9, bold=True, color="0F766E")
+
+    # 타이틀
+    ws_rep.cell(row=row_idx, column=1, value=f"2.5 AI 챗봇(ALF) 응대 현황 (인바운드 채팅 세션 기준{out_note})").font = font_sec
+    ws_rep.row_dimensions[row_idx].height = 24
+    row_idx += 1
+
+    # 테이블 헤더
+    alf_headers = ["구분 (기간)", "자체 완결율 (핵심)", "챗봇 총 수신 (인입)", "챗봇 자체 해결", "상담사 이관 연결", "비고 (특이사항)"]
+    ws_rep.row_dimensions[row_idx].height = 24
+    for ci, h in enumerate(alf_headers, 1):
+        cell = ws_rep.cell(row=row_idx, column=ci, value=h)
+        cell.font = font_tbl_h
+        cell.fill = fill_teal_header
+        cell.alignment = Alignment(vertical="center", horizontal="center")
+        cell.border = border_thin
+    row_idx += 1
+
+    # 1) 현재 기간 행
+    ws_rep.row_dimensions[row_idx].height = 22
+    cur_label = str(period_obj.get("name") or "선택 기간")
+    row_cur = [
+        f"현재 ({cur_label})",
+        f"{alf_rate:.1f}%",
+        f"{alf_inflow:,}건",
+        f"{alf_comp:,}건",
+        f"{alf_trans:,}건",
+        f"자체 완결 {alf_comp:,}건 / 총 수신 {alf_inflow:,}건"
+    ]
+    for ci, val in enumerate(row_cur, 1):
+        cell = ws_rep.cell(row=row_idx, column=ci, value=val)
+        cell.font = font_bold if ci in (2, 3) else font_regular
+        cell.alignment = Alignment(vertical="center", horizontal="center")
+        cell.border = border_thin
+        if ci == 2:
+            cell.fill = fill_banner
+    row_idx += 1
+
+    # 2) 직전 기간 행
+    ws_rep.row_dimensions[row_idx].height = 20
+    prev_label = str(prev_period_obj.get("name") or "직전 기간") if prev_period_obj else "직전"
+    row_prev = [
+        f"직전 ({prev_label})",
+        f"{prev_alf_rate:.1f}%" if prev_alf_rate is not None else "–",
+        f"{prev_alf_inflow:,}건" if prev_alf_chats else "–",
+        f"{prev_alf_comp:,}건" if prev_alf_chats else "–",
+        f"{prev_alf_trans:,}건" if prev_alf_chats else "–",
+        f"이관율 {(prev_alf_trans/prev_alf_inflow*100):.1f}%" if prev_alf_inflow > 0 else "–"
+    ]
+    for ci, val in enumerate(row_prev, 1):
+        cell = ws_rep.cell(row=row_idx, column=ci, value=val)
+        cell.font = font_regular
+        cell.alignment = Alignment(vertical="center", horizontal="center")
+        cell.border = border_thin
+    row_idx += 1
+
+    # 3) 전주 대비 증감 행
+    ws_rep.row_dimensions[row_idx].height = 22
     diff_rate_str = "–"
     if prev_alf_rate is not None:
         diff_r = alf_rate - prev_alf_rate
         diff_rate_str = f"▲+{diff_r:.1f}%p" if diff_r > 0 else (f"▼{abs(diff_r):.1f}%p" if diff_r < 0 else "0.0%p")
 
-    ws_rep.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=6)
-    apply_box(ws_rep, row_idx, 1, row_idx, 6, fill_banner, border_thin)
-    ws_rep.row_dimensions[row_idx].height = 24
-    c_alf_title = ws_rep.cell(row=row_idx, column=1, value=f"🤖 [AI 상담(ALF) 챗봇 처리율 분석]  챗봇 자체 완결율 {alf_rate:.1f}%")
-    c_alf_title.font = font_bold
-    c_alf_title.alignment = Alignment(vertical="center", horizontal="left", indent=1)
+    row_diff = [
+        "전주 대비 증감",
+        diff_rate_str,
+        calc_diff(alf_inflow, prev_alf_inflow) if prev_period_obj else "–",
+        calc_diff(alf_comp, prev_alf_comp) if prev_period_obj else "–",
+        calc_diff(alf_trans, prev_alf_trans) if prev_period_obj else "–",
+        f"자체 완결율 {diff_rate_str}" + (f", 수신 {calc_diff(alf_inflow, prev_alf_inflow)}" if prev_period_obj else "")
+    ]
+    for ci, val in enumerate(row_diff, 1):
+        cell = ws_rep.cell(row=row_idx, column=ci, value=val)
+        cell.font = font_bold
+        cell.alignment = Alignment(vertical="center", horizontal="center")
+        cell.border = border_thin
+        cell.fill = fill_total
+        if ci == 2:
+            if "▲" in val:
+                cell.font = font_teal_alf
+            elif "▼" in val:
+                cell.font = font_rose_alf
     row_idx += 1
-
-    ws_rep.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=6)
-    apply_box(ws_rep, row_idx, 1, row_idx, 6, fill_zebra, border_thin)
-    ws_rep.row_dimensions[row_idx].height = 24
-    prev_disp_str = f"{prev_alf_rate:.1f}%" if prev_alf_rate is not None else "–"
-    alf_comment_line = f"• 자체 완결: {alf_comp:,}건 ({alf_rate:.1f}%) · 총 인입: {alf_inflow:,}건 (상담사 연결: {alf_trans:,}건)  |  선택: {alf_rate:.1f}%  |  직전: {prev_disp_str}  |  증감: {diff_rate_str}"
-    c_alf_body = ws_rep.cell(row=row_idx, column=1, value=alf_comment_line)
-    c_alf_body.font = font_regular
-    c_alf_body.alignment = Alignment(vertical="center", horizontal="left", indent=1)
-    row_idx += 2
 
     # 3. 부문별 클레임 현황 & 이슈 인사이트
     ws_rep.cell(row=row_idx, column=1, value="3. 부문별 클레임 현황 & 이슈 인사이트 (품질 · 배송 · 서비스 3대 부문)").font = font_sec
@@ -1454,7 +1792,9 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
     q_y_unit = 5 if q_max_v <= 30 else (10 if q_max_v <= 100 else 25)
     chart_q = make_pillar_chart(min_row=q_start_row, max_row=q_start_row + q_chart_rows, colors=["BAE6FD", "7DD3FC", "38BDF8", "0F766E"], y_unit=q_y_unit)
     ws_rep.add_chart(chart_q, f"A{row_idx}")
-    row_idx += 16
+    for r in range(row_idx, row_idx + 14):
+        ws_rep.row_dimensions[r].height = 18
+    row_idx += 14
 
     # 품질 TOP 5 테이블 (전기간 대비 증감 포함)
     ws_rep.row_dimensions[row_idx].height = 22
@@ -1477,15 +1817,11 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
 
         for ci, cell in enumerate([c1, c2, c3, c4, c5, c6], 1):
             cell.font = font_regular; cell.border = border_thin
-            if ci == 1: cell.alignment = Alignment(vertical="center", horizontal="center")
-            elif ci == 2: cell.alignment = Alignment(vertical="center", horizontal="left", indent=1)
-            elif ci == 3: cell.alignment = Alignment(vertical="center", horizontal="center"); cell.number_format = "#,##0"
+            cell.alignment = Alignment(vertical="center", horizontal="center")
+            if ci == 3: cell.number_format = "#,##0"
             elif ci == 4:
-                cell.alignment = Alignment(vertical="center", horizontal="center")
                 cell.font = font_rose if diff_type == "rose" else (font_teal if diff_type == "teal" else font_diff_muted)
-            elif ci == 5: cell.alignment = Alignment(vertical="center", horizontal="center")
             elif ci == 6:
-                cell.alignment = Alignment(vertical="center", horizontal="center")
                 cell.font = font_muted
         row_idx += 1
 
@@ -1496,10 +1832,10 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
     )
     ws_rep.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=6)
     apply_box(ws_rep, row_idx, 1, row_idx, 6, fill_zebra, border_thin)
-    ws_rep.row_dimensions[row_idx].height = calc_comment_box_height(q_comment, char_limit=58, line_height=20, min_height=48, padding=16)
+    ws_rep.row_dimensions[row_idx].height = calc_comment_box_height(q_comment)
     ws_rep.cell(row=row_idx, column=1, value=q_comment).font = font_regular
-    ws_rep.cell(row=row_idx, column=1).alignment = Alignment(vertical="center", horizontal="left", wrap_text=True, indent=1)
-    row_idx += 2
+    ws_rep.cell(row=row_idx, column=1).alignment = Alignment(vertical="top", horizontal="left", wrap_text=True, indent=1)
+    row_idx += 1
 
     # 3-2. [배송 클레임]
     d_chart_rows = min(8, len(d_matrix))
@@ -1508,7 +1844,7 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
     ws_rep.row_dimensions[row_idx].height = 24
     d_diff_str = calc_diff(d_cur_cnt, d_prv_cnt)
     d_pct_str = calc_pct(d_cur_cnt, d_prv_cnt)
-    ws_rep.cell(row=row_idx, column=1, value=f"■ [배송 클레임 주요 유형 Top {d_chart_rows} {trend_sfx} 인입 추이] 물류원장 {d_cur_cnt:,}건 (이전 대비 {d_diff_str}, {d_pct_str})  |  현재 최다순 정렬").font = font_bold
+    ws_rep.cell(row=row_idx, column=1, value=f"■ [배송 클레임 주요 유형 Top {d_chart_rows} {trend_sfx} 인입 추이] 물류 배송클레임 {d_cur_cnt:,}건 (이전 대비 {d_diff_str}, {d_pct_str})  |  현재 최다순 정렬").font = font_bold
     ws_rep.cell(row=row_idx, column=1).alignment = Alignment(vertical="center", horizontal="left", indent=1)
     row_idx += 1
 
@@ -1517,7 +1853,9 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
     d_y_unit = 5 if d_max_v <= 30 else (10 if d_max_v <= 100 else 25)
     chart_d = make_pillar_chart(min_row=d_start_row, max_row=d_start_row + d_chart_rows, colors=["99F6E4", "5EEAD4", "2DD4BF", "0F766E"], y_unit=d_y_unit)
     ws_rep.add_chart(chart_d, f"A{row_idx}")
-    row_idx += 16
+    for r in range(row_idx, row_idx + 14):
+        ws_rep.row_dimensions[r].height = 18
+    row_idx += 14
 
     # 배송 TOP 5 테이블 (전기간 대비 증감 포함)
     ws_rep.row_dimensions[row_idx].height = 22
@@ -1540,15 +1878,11 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
 
         for ci, cell in enumerate([c1, c2, c3, c4, c5, c6], 1):
             cell.font = font_regular; cell.border = border_thin
-            if ci == 1: cell.alignment = Alignment(vertical="center", horizontal="center")
-            elif ci == 2: cell.alignment = Alignment(vertical="center", horizontal="left", indent=1)
-            elif ci == 3: cell.alignment = Alignment(vertical="center", horizontal="center"); cell.number_format = "#,##0"
+            cell.alignment = Alignment(vertical="center", horizontal="center")
+            if ci == 3: cell.number_format = "#,##0"
             elif ci == 4:
-                cell.alignment = Alignment(vertical="center", horizontal="center")
                 cell.font = font_rose if diff_type == "rose" else (font_teal if diff_type == "teal" else font_diff_muted)
-            elif ci == 5: cell.alignment = Alignment(vertical="center", horizontal="center")
             elif ci == 6:
-                cell.alignment = Alignment(vertical="center", horizontal="center")
                 cell.font = font_muted
         row_idx += 1
 
@@ -1559,10 +1893,10 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
     )
     ws_rep.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=6)
     apply_box(ws_rep, row_idx, 1, row_idx, 6, fill_zebra, border_thin)
-    ws_rep.row_dimensions[row_idx].height = calc_comment_box_height(d_comment, char_limit=58, line_height=20, min_height=48, padding=16)
+    ws_rep.row_dimensions[row_idx].height = calc_comment_box_height(d_comment)
     ws_rep.cell(row=row_idx, column=1, value=d_comment).font = font_regular
-    ws_rep.cell(row=row_idx, column=1).alignment = Alignment(vertical="center", horizontal="left", wrap_text=True, indent=1)
-    row_idx += 2
+    ws_rep.cell(row=row_idx, column=1).alignment = Alignment(vertical="top", horizontal="left", wrap_text=True, indent=1)
+    row_idx += 1
 
     # 3-3. [서비스 클레임]
     s_chart_rows = min(8, len(s_matrix))
@@ -1580,7 +1914,9 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
     s_y_unit = 2 if s_max_v <= 15 else (5 if s_max_v <= 50 else 10)
     chart_s = make_pillar_chart(min_row=s_start_row, max_row=s_start_row + s_chart_rows, colors=["DDD6FE", "C4B5FD", "A78BFA", "7C3AED"], y_unit=s_y_unit)
     ws_rep.add_chart(chart_s, f"A{row_idx}")
-    row_idx += 16
+    for r in range(row_idx, row_idx + 14):
+        ws_rep.row_dimensions[r].height = 18
+    row_idx += 14
 
     # 서비스 TOP 5 테이블 (전기간 대비 증감 포함)
     ws_rep.row_dimensions[row_idx].height = 22
@@ -1603,15 +1939,11 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
 
         for ci, cell in enumerate([c1, c2, c3, c4, c5, c6], 1):
             cell.font = font_regular; cell.border = border_thin
-            if ci == 1: cell.alignment = Alignment(vertical="center", horizontal="center")
-            elif ci == 2: cell.alignment = Alignment(vertical="center", horizontal="left", indent=1)
-            elif ci == 3: cell.alignment = Alignment(vertical="center", horizontal="center"); cell.number_format = "#,##0"
+            cell.alignment = Alignment(vertical="center", horizontal="center")
+            if ci == 3: cell.number_format = "#,##0"
             elif ci == 4:
-                cell.alignment = Alignment(vertical="center", horizontal="center")
                 cell.font = font_rose if diff_type == "rose" else (font_teal if diff_type == "teal" else font_diff_muted)
-            elif ci == 5: cell.alignment = Alignment(vertical="center", horizontal="center")
             elif ci == 6:
-                cell.alignment = Alignment(vertical="center", horizontal="center")
                 cell.font = font_muted
         row_idx += 1
 
@@ -1622,10 +1954,10 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
     )
     ws_rep.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=6)
     apply_box(ws_rep, row_idx, 1, row_idx, 6, fill_zebra, border_thin)
-    ws_rep.row_dimensions[row_idx].height = calc_comment_box_height(s_comment, char_limit=58, line_height=20, min_height=48, padding=16)
+    ws_rep.row_dimensions[row_idx].height = calc_comment_box_height(s_comment)
     ws_rep.cell(row=row_idx, column=1, value=s_comment).font = font_regular
-    ws_rep.cell(row=row_idx, column=1).alignment = Alignment(vertical="center", horizontal="left", wrap_text=True, indent=1)
-    row_idx += 2
+    ws_rep.cell(row=row_idx, column=1).alignment = Alignment(vertical="top", horizontal="left", wrap_text=True, indent=1)
+    row_idx += 1
 
     # 4. 리스크 모니터링 배너 및 CX팀 종합 코멘트
     ws_rep.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=6)
@@ -1633,13 +1965,9 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
     ws_rep.row_dimensions[row_idx].height = 24
     ws_rep.cell(row=row_idx, column=1, value="⚠️ [리스크 모니터링] 고위험 클레임 및 세부 고객 문의 원문은 '품질raw', '배송raw', '서비스raw' 시트에서 전수 확인하실 수 있습니다.").font = Font(name="맑은 고딕", size=9, bold=True, color="B45309")
     ws_rep.cell(row=row_idx, column=1).alignment = Alignment(vertical="center", horizontal="left", indent=1)
-    row_idx += 2
-
-    # CX팀 종합 코멘트 (대시보드 실시간 동기화)
-    ws_rep.cell(row=row_idx, column=1, value="4. CX팀 종합 코멘트 (대시보드 이슈 메모)").font = font_sec
-    ws_rep.row_dimensions[row_idx].height = 24
     row_idx += 1
 
+    # CX팀 종합 코멘트 (메모가 있을 때만 노출, 없으면 전체 미노출)
     memo_lines = []
     if memos and isinstance(memos, list) and len(memos) > 0:
         for idx, m in enumerate(memos, 1):
@@ -1647,26 +1975,25 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
                 m_txt = m.get("text") or m.get("content") or ""
                 m_author = m.get("author") or m.get("user") or "CX팀"
                 m_dt = m.get("date") or m.get("created_at") or ""
-                memo_lines.append(f"● [메모 {idx}] {m_txt} ({m_author} | {m_dt})")
+                if m_txt.strip():
+                    memo_lines.append(f"● [메모 {idx}] {m_txt.strip()} ({m_author} | {m_dt})")
             elif isinstance(m, str) and m.strip():
                 memo_lines.append(f"● [메모 {idx}] {m.strip()}")
 
-    if not memo_lines:
-        memo_lines = [
-            f"● [총평] {period_disp} 전체 VOC 인입량은 {cur_tot:,}건으로 안정적인 운영 수준을 유지하고 있습니다.",
-            f"● [품질 관리] 물티슈 및 스킨케어 품질 클레임은 {q_cur_cnt:,}건 발생하였으며, 주요 이슈 건에 대해 제조공정 역추적 및 맞교환 조치를 완료하였습니다.",
-            f"● [배송 및 서비스] 배송 클레임 {d_cur_cnt:,}건, 서비스 클레임 {s_cur_cnt:,}건에 대해 물류 벤더사 오배송/파손 방지 조치 및 실시간 응대율 95% 이상을 달성하였습니다."
-        ]
+    if memo_lines:
+        ws_rep.cell(row=row_idx, column=1, value="4. CX팀 종합 코멘트 (대시보드 이슈 메모)").font = font_sec
+        ws_rep.row_dimensions[row_idx].height = 24
+        row_idx += 1
 
-    memo_text = "\n".join(memo_lines)
-    box_height = calc_comment_box_height(memo_text, char_limit=58, line_height=20, min_height=70, padding=20)
+        memo_text = "\n".join(memo_lines)
+        box_height = calc_comment_box_height(memo_text)
 
-    ws_rep.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=6)
-    apply_box(ws_rep, row_idx, 1, row_idx, 6, fill_zebra, border_thin)
-    ws_rep.row_dimensions[row_idx].height = box_height
-    ws_rep.cell(row=row_idx, column=1, value=memo_text).font = font_regular
-    ws_rep.cell(row=row_idx, column=1).alignment = Alignment(vertical="top", horizontal="left", wrap_text=True, indent=1)
-    row_idx += 2
+        ws_rep.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=6)
+        apply_box(ws_rep, row_idx, 1, row_idx, 6, fill_zebra, border_thin)
+        ws_rep.row_dimensions[row_idx].height = box_height
+        ws_rep.cell(row=row_idx, column=1, value=memo_text).font = font_regular
+        ws_rep.cell(row=row_idx, column=1).alignment = Alignment(vertical="top", horizontal="left", wrap_text=True, indent=1)
+        row_idx += 1
 
     # Footer
     ws_rep.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=6)
@@ -1683,8 +2010,8 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
 
     q_col_names = [
         "연도", "분기", "월보고용 월", "주차월(MONTH)", "WEEK", "M&W", "id", "고객명",
-        "인입일시", "접수일자(DATE)", "담당자", "대분류", "중분류", "소분류",
-        "제품명", "제조일자", "문의내용", "품질발송여부", "보상내역서(월)", "보상내역서_전체",
+        "인입일시", "접수일자(DATE)", "담당자", "채널", "방향", "대분류", "중분류", "소분류",
+        "제품명", "제조일자", "문의내용", "조치내역", "품질발송여부", "보상취합여부",
         "유통채널", "주문번호", "출고처", "송장번호"
     ]
     ws_qraw.append(q_col_names)
@@ -1698,9 +2025,6 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
     # 이전 비교 대상 주차군 (주간이면 직전 4주, 월/분기/연간이면 직전 기간)
     prev_lookback_keys = prev_week_keys if (is_month or is_quarter or is_year) else set(w["key"] for w in weeks[max(0, p_idx - 4):p_idx])
 
-    # 선택 기간 데이터 (최상단 + 파스텔 오렌지 음영 + 노출)
-    # 직전 비교 기간 데이터 (음영 제외 + 노출)
-    # 그 외 과거 데이터 (행 숨김 처리, 필터 해제 시 조회 가능)
     if is_week:
         selected_raw = [r for r in raw_records if r.get("weekKey") in target_week_keys]
         lookback_raw = [r for r in raw_records if r.get("weekKey") not in target_week_keys and r.get("weekKey") in prev_lookback_keys]
@@ -1711,20 +2035,20 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
         older_raw = [r for r in raw_records if not is_item_in_p(r, period_obj) and not is_item_in_p(r, prev_period_obj)]
     sorted_raw = [(r, True, False) for r in selected_raw] + [(r, False, True) for r in lookback_raw] + [(r, False, False) for r in older_raw]
 
-    ws_qraw.auto_filter.ref = f"A1:X{len(sorted_raw) + 1}"
+    ws_qraw.auto_filter.ref = f"A1:{get_column_letter(len(q_col_names))}{len(sorted_raw) + 1}"
 
     for ri, (r, is_sel, is_lookback) in enumerate(sorted_raw, 2):
         ws_qraw.row_dimensions[ri].height = 20
-        # 현재 선택 기간 및 직전 비교 기간 데이터는 표시하고, 그 이전 과거 데이터만 행 숨김
         if not is_sel and not is_lookback:
             ws_qraw.row_dimensions[ri].hidden = True
 
+        comp_mark = "O" if r.get("isComp", True) else "X"
         row_vals = [
             r.get("year", ""), r.get("quarter", ""), r.get("reportMonth", ""), r.get("month", ""),
             r.get("week", ""), r.get("mw", ""), r.get("id", ""), r.get("cust", ""),
-            r.get("time", ""), r.get("date", ""), r.get("mgr", ""), r.get("tagA", ""),
-            r.get("tagB", ""), r.get("tagC", ""), r.get("prod", ""), r.get("mfg", ""),
-            r.get("issue", ""), r.get("qualitySend", ""), r.get("compMonth", ""), r.get("compAll", ""),
+            r.get("time", ""), r.get("date", ""), r.get("mgr", ""), r.get("channel", "채팅"), r.get("direction", "인바운드"),
+            r.get("tagA", "클레임(공통)"), r.get("tagB", ""), r.get("tagC", ""), r.get("prod", ""), r.get("mfg", ""),
+            r.get("issue", ""), r.get("act", ""), r.get("qualitySend", "X"), comp_mark,
             r.get("mall", ""), r.get("orderNo", ""), r.get("shipmentType", ""), r.get("invoice", "")
         ]
         for ci, val in enumerate(row_vals, 1):
@@ -1732,11 +2056,11 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
             cell.font = font_bold if is_sel else font_regular
             cell.border = border_thin
             if is_sel: cell.fill = fill_pastel_orange
-            is_left = ci in (15, 17)  # 제품명(13)과 문의내용(15)만 좌측 정렬, 나머지 전 컬럼 가운데 정렬!
+            is_left = ci in (17, 19, 20)  # 제품명(17), 문의내용(19), 조치내역(20) 좌측 정렬, 나머지 가운데 정렬
             cell.alignment = Alignment(vertical="center", horizontal="left" if is_left else "center", indent=1 if is_left else 0)
 
-    # 컬럼 너비 설정 (문의내용은 48 고정 유지, 나머지 컬럼은 여백 최적화)
-    q_widths = [8, 9, 12, 12, 8, 12, 18, 12, 20, 14, 11, 13, 13, 15, 34, 15, 48, 12, 14, 14, 14, 16, 12, 16]
+    # 컬럼 너비 설정 (문의내용 48, 제품명 34, 조치내역 30 등 여백 최적화)
+    q_widths = [8, 9, 12, 12, 8, 12, 18, 12, 20, 14, 11, 10, 10, 13, 13, 15, 34, 15, 48, 30, 12, 14, 14, 18, 12, 18]
     for ci, w in enumerate(q_widths, 1):
         ws_qraw.column_dimensions[get_column_letter(ci)].width = w
 
@@ -1748,9 +2072,9 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
     ws_sraw.freeze_panes = "A2"
 
     s_col_names = [
-        "NO", "연도", "분기", "MONTH", "WEEK", "물류센터(출고처)",
-        "클레임유형", "위험도", "고객명", "주문번호", "송장번호",
-        "제품명", "파손/불량수량", "클레임내용", "조치내역"
+        "NO", "연도", "분기", "주차월(MONTH)", "WEEK", "출고처",
+        "중분류(클레임유형)", "위험도", "고객명", "접수일자(DATE)", "주문번호", "송장번호",
+        "제품명", "파손/불량수량", "문의내용", "조치내역"
     ]
     ws_sraw.append(s_col_names)
     ws_sraw.row_dimensions[1].height = 25
@@ -1764,6 +2088,7 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
     # 배송 raw 대상 주차군
     ship_lookback_keys = prev_week_keys if (is_month or is_quarter or is_year) else set(w["key"] for w in weeks[max(0, p_idx - 4):p_idx])
     shipments_by_week_dict = voc_data.get("SHIPMENTS_BY_WEEK", {})
+    ship_db_prod_map = get_db_shipment_product_map()
     all_ship_records = []
 
     for w in reversed(weeks):
@@ -1782,10 +2107,23 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
         if not is_sel and not is_prev:
             ws_sraw.row_dimensions[ri].hidden = True
 
-        y_str = str(w.get("year", ""))
-        q_str = f"{w.get('quarter', '')}Q" if w.get('quarter') else ""
-        m_str = f"{w.get('month', '')}월" if w.get('month') else ""
-        w_str = w.get("week_of_month") or w.get("key", "")
+        y_str = str(w.get("year", "2026")).replace("년", "").strip()
+        q_raw = str(w.get('quarter', '4')).replace('분기', '').replace('Q', '').strip()
+        q_str = f"{q_raw}분기" if q_raw else "4분기"
+        m_raw = str(w.get('month', '11')).replace('월', '').strip()
+        if '-' in m_raw: m_raw = m_raw.split('-')[-1]
+        m_str = f"{int(m_raw)}월" if m_raw.isdigit() else (m_raw + '월' if m_raw else '')
+        w_raw = w.get("week_of_month") or w.get("key", "")
+        w_match = re.search(r'(\d+)주', str(w_raw))
+        w_str = f"{w_match.group(1)}주" if w_match else str(w_raw)
+
+        # 원본 DB 제품명 매핑 우선 적용 (임의 축약/기호 누락 방지)
+        orig_prod = (
+            s.get("raw_prod")
+            or ship_db_prod_map.get(str(s.get("id", "")))
+            or ship_db_prod_map.get(str(s.get("invoice", "")))
+            or s.get("prod", "")
+        )
 
         row_vals = [
             ri - 1,
@@ -1797,9 +2135,10 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
             s.get("type", ""),
             s.get("risk", "LOW"),
             s.get("cust", ""),
+            s.get("date", ""),
             s.get("orderNo", ""),
             s.get("invoice", ""),
-            s.get("prod", ""),
+            orig_prod,
             s.get("qty") if s.get("qty") is not None else 1,
             s.get("text", ""),
             s.get("action", "")
@@ -1810,10 +2149,10 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
             cell.border = border_thin
             if is_sel:
                 cell.fill = fill_pastel_orange
-            is_left = ci in (12, 14, 15)
+            is_left = ci in (13, 15, 16)  # 제품명(13), 문의내용(15), 조치내역(16) 좌측 정렬
             cell.alignment = Alignment(vertical="center", horizontal="left" if is_left else "center", indent=1 if is_left else 0)
 
-    s_widths = [6, 8, 8, 8, 12, 16, 14, 10, 12, 18, 16, 32, 12, 45, 30]
+    s_widths = [6, 8, 8, 12, 10, 14, 16, 10, 12, 14, 18, 16, 32, 12, 48, 30]
     for ci, w in enumerate(s_widths, 1):
         ws_sraw.column_dimensions[get_column_letter(ci)].width = w
 
@@ -1825,8 +2164,9 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
     ws_svcraw.freeze_panes = "A2"
 
     svc_col_names = [
-        "연도", "분기", "MONTH", "WEEK", "M&W", "id", "고객명", "DATE", "담당자",
-        "채널", "방향", "중분류", "소분류", "제품명", "문의내용", "조치내역", "유통채널"
+        "연도", "분기", "월보고용 월", "주차월(MONTH)", "WEEK", "M&W", "id", "고객명",
+        "인입일시", "접수일자(DATE)", "담당자", "채널", "방향", "대분류", "중분류", "소분류",
+        "제품명", "제조일자", "문의내용", "조치내역", "품질발송여부", "유통채널", "주문번호", "출고처", "송장번호"
     ]
     ws_svcraw.append(svc_col_names)
     ws_svcraw.row_dimensions[1].height = 25
@@ -1844,14 +2184,14 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
     if is_week:
         selected_svc = [r for r in svc_raw_records if r.get("weekKey") in target_week_keys]
         lookback_svc = [r for r in svc_raw_records if r.get("weekKey") not in target_week_keys and r.get("weekKey") in svc_lookback_keys]
-        older_svc = [r for r in svc_raw_records if r.get("weekKey") not in target_week_keys and r.get("weekKey") not in svc_lookback_keys]
+        older_svc = [r for r in svc_raw_records if r.get("weekKey") not in target_week_keys and r.get("weekKey") in svc_lookback_keys]
     else:
         selected_svc = [r for r in svc_raw_records if is_item_in_p(r, period_obj)]
         lookback_svc = [r for r in svc_raw_records if not is_item_in_p(r, period_obj) and is_item_in_p(r, prev_period_obj)]
         older_svc = [r for r in svc_raw_records if not is_item_in_p(r, period_obj) and not is_item_in_p(r, prev_period_obj)]
     sorted_svc = [(r, True, False) for r in selected_svc] + [(r, False, True) for r in lookback_svc] + [(r, False, False) for r in older_svc]
 
-    ws_svcraw.auto_filter.ref = f"A1:Q{len(sorted_svc) + 1}"
+    ws_svcraw.auto_filter.ref = f"A1:{get_column_letter(len(svc_col_names))}{len(sorted_svc) + 1}"
 
     for ri, (r, is_sel, is_lookback) in enumerate(sorted_svc, 2):
         ws_svcraw.row_dimensions[ri].height = 20
@@ -1859,11 +2199,13 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
             ws_svcraw.row_dimensions[ri].hidden = True
 
         row_vals = [
-            r.get("year", ""), r.get("quarter", ""), r.get("month", ""), r.get("week", ""),
-            r.get("mw", ""), r.get("id", ""), r.get("cust", ""), r.get("date", ""),
-            r.get("mgr", ""), r.get("channel", ""), r.get("direction", ""),
-            r.get("tagB", ""), r.get("tagC", ""), r.get("prod", ""),
-            r.get("issue", ""), r.get("act", ""), r.get("mall", "")
+            r.get("year", ""), r.get("quarter", ""), r.get("reportMonth", ""), r.get("month", ""),
+            r.get("week", ""), r.get("mw", ""), r.get("id", ""), r.get("cust", ""),
+            r.get("time", ""), r.get("date", ""), r.get("mgr", ""), r.get("channel", "채팅"), r.get("direction", "인바운드"),
+            r.get("tagA", "클레임(공통)"), r.get("tagB", ""), r.get("tagC", ""), r.get("prod", ""),
+            r.get("mfg", ""),
+            r.get("issue", ""), r.get("act", ""), r.get("qualitySend", "X"), r.get("mall", ""),
+            r.get("orderNo", ""), r.get("shipmentType", ""), r.get("invoice", "")
         ]
         for ci, val in enumerate(row_vals, 1):
             cell = ws_svcraw.cell(row=ri, column=ci, value=val)
@@ -1871,10 +2213,10 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
             cell.border = border_thin
             if is_sel:
                 cell.fill = fill_pastel_orange
-            is_left = ci in (14, 15, 16)  # 제품명(14), 문의내용(15), 조치내역(16) 좌측 정렬
+            is_left = ci in (17, 19, 20)  # 제품명(17), 문의내용(19), 조치내역(20) 좌측 정렬, 제조일자(18), 품질발송여부(21) 등 중앙 정렬
             cell.alignment = Alignment(vertical="center", horizontal="left" if is_left else "center", indent=1 if is_left else 0)
 
-    svc_widths = [8, 9, 9, 8, 12, 18, 12, 14, 11, 12, 12, 14, 16, 30, 45, 35, 14]
+    svc_widths = [8, 9, 12, 12, 8, 12, 18, 12, 20, 14, 11, 10, 10, 13, 13, 15, 34, 15, 48, 30, 12, 14, 18, 12, 18]
     for ci, w in enumerate(svc_widths, 1):
         ws_svcraw.column_dimensions[get_column_letter(ci)].width = w
 
@@ -1949,23 +2291,37 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
                 try:
                     # 썸네일 캐시를 활용하여 고속 로드 및 메모리 절감
                     thumb_bytes, mime = read_claim_photo_bytes(fld, fn, is_thumb=True)
-                    if thumb_bytes:
-                        img_buf = io.BytesIO(thumb_bytes)
-                        img = OpenpyxlImage(img_buf)
-                        img.width = 220
-                        img.height = 170
-                        cell_ref = f"{get_column_letter(col)}{cur_row}"
-                        ws_photo.add_image(img, cell_ref)
-                    elif PILImage is not None:
+                    img_to_add = None
+                    nw, nh = 220, 170
+
+                    if thumb_bytes and PILImage is not None:
+                        with PILImage.open(io.BytesIO(thumb_bytes)) as im:
+                            w, h = im.size
+                            scale = min(220 / max(1, w), 170 / max(1, h))
+                            nw, nh = max(1, int(w * scale)), max(1, int(h * scale))
+                        img_to_add = OpenpyxlImage(io.BytesIO(thumb_bytes))
+                    elif PILImage is not None and os.path.exists(fp):
                         with PILImage.open(fp) as im:
                             w, h = im.size
-                            scale = min(220 / w, 170 / h)
+                            scale = min(220 / max(1, w), 170 / max(1, h))
                             nw, nh = max(1, int(w * scale)), max(1, int(h * scale))
-                            img = OpenpyxlImage(fp)
-                            img.width = nw
-                            img.height = nh
-                            cell_ref = f"{get_column_letter(col)}{cur_row}"
-                            ws_photo.add_image(img, cell_ref)
+                        img_to_add = OpenpyxlImage(fp)
+
+                    if img_to_add is not None:
+                        img_to_add.width = nw
+                        img_to_add.height = nh
+
+                        # 열 너비 34는 약 246px, 행 높이 150pt는 약 200px
+                        # 셀 틀 안에서 가로/세로 정중앙(Center) 배치를 위한 오프셋 산출
+                        cell_w_px = 246
+                        cell_h_px = 200
+                        offset_x = max(0, int((cell_w_px - nw) / 2))
+                        offset_y = max(0, int((cell_h_px - nh) / 2))
+
+                        marker = AnchorMarker(col=col - 1, colOff=pixels_to_EMU(offset_x), row=cur_row - 1, rowOff=pixels_to_EMU(offset_y))
+                        size = XDRPositiveSize2D(pixels_to_EMU(nw), pixels_to_EMU(nh))
+                        img_to_add.anchor = OneCellAnchor(_from=marker, ext=size)
+                        ws_photo.add_image(img_to_add)
                 except Exception as img_err:
                     print(f"Warning: Failed to add image {fn}:", img_err)
 
@@ -2290,8 +2646,8 @@ def build_report_excel(target_period_key=None, memos=None, insights=None):
     return wb, period_disp
 
 
-def generate_report_excel_bytes(target_period_key=None, memos=None, insights=None):
-    wb, period_disp = build_report_excel(target_period_key, memos=memos, insights=insights)
+def generate_report_excel_bytes(target_period_key=None, memos=None, insights=None, include_missed=False):
+    wb, period_disp = build_report_excel(target_period_key, memos=memos, insights=insights, include_missed=include_missed)
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)

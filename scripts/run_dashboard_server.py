@@ -72,6 +72,38 @@ tunnel_info = {
     "proc": None
 }
 
+import time
+last_gdrive_sync_time = 0
+gdrive_sync_lock = threading.Lock()
+
+def bg_sync_gdrive():
+    global last_gdrive_sync_time
+    with gdrive_sync_lock:
+        now = time.time()
+        if now - last_gdrive_sync_time < 120:  # 최소 2분 주기 쓰로틀링
+            return
+        last_gdrive_sync_time = now
+        try:
+            sys.path.append(str(Path(__file__).resolve().parent))
+            import sync_gdrive_photos
+            importlib.reload(sync_gdrive_photos)
+            sync_gdrive_photos.sync_claim_photos_from_gdrive(quiet=True)
+        except Exception:
+            pass
+
+def start_gdrive_auto_sync(interval_seconds=1800):
+    def _worker():
+        time.sleep(3)
+        while True:
+            try:
+                bg_sync_gdrive()
+            except Exception:
+                pass
+            time.sleep(interval_seconds)
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+
 class CustomHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=DIRECTORY, **kwargs)
@@ -103,7 +135,17 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             from urllib.parse import parse_qs, urlparse
             query_params = parse_qs(urlparse(self.path).query)
             target_period = query_params.get("period", [None])[0]
-            self.handle_export_excel(target_period)
+            inc_m = query_params.get("includeMissed", query_params.get("include_missed", ["0"]))[0]
+            include_missed = inc_m in ["1", "true", "True"]
+            self.handle_export_excel(target_period, include_missed=include_missed)
+            return
+        elif clean_path == "/api/export_report_pdf":
+            from urllib.parse import parse_qs, urlparse
+            query_params = parse_qs(urlparse(self.path).query)
+            target_period = query_params.get("period", [None])[0]
+            target_mode = query_params.get("mode", ["weekly"])[0]
+            risk_enabled = query_params.get("riskEnabled", ["0"])[0] in ("1", "true", "True")
+            self.handle_export_pdf(target_period, target_mode=target_mode, risk_enabled=risk_enabled)
             return
         elif clean_path == "/api/claim_photos":
             from urllib.parse import parse_qs, urlparse
@@ -122,6 +164,28 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         elif clean_path == "/api/compensation_overrides":
             self.handle_get_compensation_overrides()
             return
+        elif clean_path == "/api/cat_insights":
+            self.handle_get_cat_insights()
+            return
+        elif clean_path == "/api/memos":
+            self.handle_get_memos()
+            return
+        elif clean_path == "/api/sync_gdrive_photos":
+            try:
+                sys.path.append(str(Path(__file__).resolve().parent))
+                import sync_gdrive_photos
+                importlib.reload(sync_gdrive_photos)
+                ok, msg = sync_gdrive_photos.sync_claim_photos_from_gdrive(quiet=True)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(json.dumps({"ok": ok, "message": msg}, ensure_ascii=False).encode("utf-8"))
+            except Exception as e:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(json.dumps({"ok": False, "message": str(e)}, ensure_ascii=False).encode("utf-8"))
+            return
         elif clean_path == "/api/server_info":
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -137,8 +201,9 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                         pass
             info = {
                 "local": f"http://localhost:{PORT}",
-                "network": f"http://{cur_ip}:{PORT}",
-                "tunnel": tun_url
+                "network": "http://192.168.0.12:8080",
+                "ddns": "http://bebesup-voc.synology.me:8080",
+                "tunnel": "http://bebesup-voc.synology.me:8080"
             }
             self.wfile.write(json.dumps(info, ensure_ascii=False).encode("utf-8"))
             return
@@ -188,7 +253,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self):
         clean_path = self.path.split("?")[0].rstrip("/")
-        if clean_path == "/api/sync":
+        if clean_path in ["/api/sync", "/api/fast_sync"]:
             self.handle_sync_request()
             return
         elif clean_path == "/api/login":
@@ -246,6 +311,28 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                     pass
             self.handle_save_compensation_overrides(body_data)
             return
+        elif clean_path == "/api/cat_insights":
+            content_length = int(self.headers.get("Content-Length", 0))
+            body_bytes = self.rfile.read(content_length) if content_length > 0 else b""
+            body_data = {}
+            if body_bytes:
+                try:
+                    body_data = json.loads(body_bytes.decode("utf-8"))
+                except Exception:
+                    pass
+            self.handle_save_cat_insights(body_data)
+            return
+        elif clean_path == "/api/memos":
+            content_length = int(self.headers.get("Content-Length", 0))
+            body_bytes = self.rfile.read(content_length) if content_length > 0 else b""
+            body_data = {}
+            if body_bytes:
+                try:
+                    body_data = json.loads(body_bytes.decode("utf-8"))
+                except Exception:
+                    pass
+            self.handle_save_memos(body_data)
+            return
         elif clean_path == "/api/export_report_excel":
             content_length = int(self.headers.get("Content-Length", 0))
             body_bytes = self.rfile.read(content_length) if content_length > 0 else b""
@@ -259,7 +346,8 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             memos = body_data.get("memos", [])
             insights = body_data.get("insights", {})
             user_info = body_data.get("user")
-            self.handle_export_excel(target_period, memos=memos, insights=insights, user_info=user_info)
+            include_missed = bool(body_data.get("includeMissed", False))
+            self.handle_export_excel(target_period, memos=memos, insights=insights, user_info=user_info, include_missed=include_missed)
             return
         elif clean_path == "/api/audit_log":
             content_length = int(self.headers.get("Content-Length", 0))
@@ -282,9 +370,98 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps({"ok": True, "message": "Server restarting..."}, ensure_ascii=False).encode("utf-8"))
             threading.Timer(1.0, lambda: os._exit(0)).start()
             return
-        self.send_error(404, "Not Found")
+    def handle_export_pdf(self, target_period=None, target_mode="weekly", risk_enabled=False):
+        try:
+            import asyncio
+            from playwright.async_api import async_playwright
+            from urllib.parse import quote
 
-    def handle_export_excel(self, target_period, memos=None, insights=None, user_info=None):
+            async def _gen():
+                async with async_playwright() as p:
+                    try:
+                        browser = await p.chromium.launch(channel="msedge")
+                    except Exception:
+                        browser = await p.chromium.launch()
+                    page = await browser.new_page(viewport={"width": 1440, "height": 900}, device_scale_factor=2)
+                    url = f"http://127.0.0.1:{PORT}/index.html?print=true"
+                    await page.goto(url)
+                    await page.wait_for_timeout(1000)
+                    t_period = target_period or ""
+                    t_mode = target_mode or "weekly"
+                    await page.evaluate(f"""() => {{
+                        const E = window.VOC_ENGINE || window.E;
+                        const R = window.VOC_RENDER || {{}};
+                        if (typeof switchView === 'function') switchView('report');
+                        else if (R.switchView) R.switchView('report');
+
+                        if (E) {{
+                            if ('{t_mode}' && E.state) {{
+                                E.state.mode = '{t_mode}';
+                            }}
+                            const tp = '{t_period}';
+                            if (tp && tp !== 'None') {{
+                                const list = E.getPeriodList();
+                                const idx = list.findIndex(p => p.key === tp || p.label === tp);
+                                if (idx !== -1) {{
+                                    E.state.periodIndex = idx;
+                                    const pSel = document.getElementById('periodSelect');
+                                    if (pSel) pSel.value = String(idx);
+                                }}
+                            }}
+                        }}
+                        if (typeof reportRiskSectionEnabled !== 'undefined') {{
+                            reportRiskSectionEnabled = {'true' if risk_enabled else 'false'};
+                        }}
+                        if (typeof renderReport === 'function') renderReport();
+                        else if (R.renderReport) R.renderReport();
+                        else if (window.renderReport) window.renderReport();
+                    }}""")
+                    await page.wait_for_timeout(800)
+                    await page.evaluate("""() => {
+                        window.dispatchEvent(new Event('resize'));
+                        if (typeof Chart !== 'undefined') {
+                            for (let id in Chart.instances) {
+                                Chart.instances[id].resize();
+                            }
+                        }
+                    }""")
+                    await page.wait_for_timeout(600)
+                    article = await page.wait_for_selector("#reportView article")
+                    png_bytes = await article.screenshot(type="png")
+                    await browser.close()
+
+                    import io
+                    from PIL import Image
+
+                    img = Image.open(io.BytesIO(png_bytes))
+                    if img.mode in ("RGBA", "LA"):
+                        bg = Image.new("RGB", img.size, (255, 255, 255))
+                        bg.paste(img, mask=img.split()[3])
+                        img = bg
+                    else:
+                        img = img.convert("RGB")
+
+                    pdf_buffer = io.BytesIO()
+                    img.save(pdf_buffer, format="PDF", resolution=144.0)
+                    return pdf_buffer.getvalue()
+
+            pdf_data = asyncio.run(_gen())
+            safe_p = (target_period or "리포트").replace("/", "_").replace(":", "_").replace(" ", "_")
+            filename = f"[베베숲]_VOC_분석_종합리포트_{safe_p}.pdf"
+
+            self.send_response(200)
+            self.send_header("Content-Type", "application/pdf")
+            self.send_header("Content-Disposition", f'attachment; filename="{quote(filename)}"; filename*=UTF-8\'\'{quote(filename)}')
+            self.send_header("Content-Length", str(len(pdf_data)))
+            self.end_headers()
+            self.wfile.write(pdf_data)
+        except Exception as e:
+            self.send_response(500)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": f"PDF 생성 실패: {str(e)}"}, ensure_ascii=False).encode("utf-8"))
+
+    def handle_export_excel(self, target_period, memos=None, insights=None, user_info=None, include_missed=False):
         from urllib.parse import quote
         u = user_info or {}
         if u.get("role") != "admin":
@@ -297,13 +474,14 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         try:
             client_ip = self.get_client_ip()
             user_agent = self.headers.get("User-Agent", "")[:100]
+            mode_desc = "채널톡공식_부재포함" if include_missed else "순수실통화"
             employee_auth.record_audit_log({
                 "action": "EXCEL_DOWNLOAD",
                 "username": u.get("username", "anonymous"),
                 "name": u.get("name", ""),
                 "dept": u.get("dept", ""),
                 "role": u.get("role", "user"),
-                "target": f"VOC 분석종합리포트 엑셀_{target_period or 'latest'}",
+                "target": f"VOC 분석종합리포트 엑셀_{target_period or 'latest'}_{mode_desc}",
                 "ip": client_ip,
                 "user_agent": user_agent
             }, PROJECT_ROOT)
@@ -316,12 +494,14 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             import generate_report_excel
             importlib.reload(generate_report_excel)
             excel_bytes, period_disp = generate_report_excel.generate_report_excel_bytes(
-                target_period, memos=memos, insights=insights
+                target_period, memos=memos, insights=insights, include_missed=include_missed
             )
             
             safe_name = period_disp.replace(" ", "_").replace("(", "").replace(")", "")
-            filename_ascii = f"VOC_report_{target_period or 'latest'}.xlsx"
-            filename_utf8 = f"[CX팀]_VOC_분석종합리포트_{safe_name}.xlsx"
+            mode_tag_ascii = "_with_missed" if include_missed else "_pure_calls"
+            mode_tag_utf8 = "_부재포함" if include_missed else "_실통화"
+            filename_ascii = f"VOC_report_{target_period or 'latest'}{mode_tag_ascii}.xlsx"
+            filename_utf8 = f"[CX팀]_VOC_분석종합리포트_{safe_name}{mode_tag_utf8}.xlsx"
             encoded_utf8 = quote(filename_utf8)
 
             self.send_response(200)
@@ -341,8 +521,14 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
     def handle_claim_photos_list(self, target_week):
         try:
             sys.path.append(str(Path(__file__).resolve().parent))
+            import importlib
             import generate_report_excel
+            importlib.reload(generate_report_excel)
             res = generate_report_excel.get_claim_photos_for_period(target_week)
+            # 해당 기간 사진이 0건이고 최근 3분간 구글 드라이브 동기화를 안 했다면 백그라운드 자동 동기화 트리거
+            if not res.get("photos") and (time.time() - last_gdrive_sync_time > 180):
+                threading.Thread(target=bg_sync_gdrive, daemon=True).start()
+
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
@@ -357,7 +543,9 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
     def handle_claim_photo_file(self, folder, file_name, is_thumb=False):
         try:
             sys.path.append(str(Path(__file__).resolve().parent))
+            import importlib
             import generate_report_excel
+            importlib.reload(generate_report_excel)
             img_bytes, mime = generate_report_excel.read_claim_photo_bytes(folder, file_name, is_thumb=is_thumb)
             if not img_bytes:
                 self.send_error(404, "Photo Not Found")
@@ -389,7 +577,9 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             sync_status["is_syncing"] = True
             try:
                 sys.path.append(str(Path(__file__).resolve().parent))
+                import importlib
                 import fast_unified_sync
+                importlib.reload(fast_unified_sync)
                 result = fast_unified_sync.run_fast_patch(sync_api=True, api_days=7)
                 sync_status["last_synced"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 sync_status["last_result"] = result
@@ -422,6 +612,64 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         ov_file = Path(DIRECTORY) / "compensation_overrides.json"
         try:
             with open(ov_file, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": True}, ensure_ascii=False).encode("utf-8"))
+        except Exception as e:
+            self.send_response(500)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False).encode("utf-8"))
+
+    def handle_get_cat_insights(self):
+        ins_file = Path(DIRECTORY) / "voc_cat_insights.json"
+        data = {}
+        if ins_file.exists():
+            try:
+                with open(ins_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                pass
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+
+    def handle_save_cat_insights(self, payload):
+        ins_file = Path(DIRECTORY) / "voc_cat_insights.json"
+        try:
+            with open(ins_file, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": True}, ensure_ascii=False).encode("utf-8"))
+        except Exception as e:
+            self.send_response(500)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False).encode("utf-8"))
+
+    def handle_get_memos(self):
+        memo_file = Path(DIRECTORY) / "voc_memos.json"
+        data = {}
+        if memo_file.exists():
+            try:
+                with open(memo_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                pass
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+
+    def handle_save_memos(self, payload):
+        memo_file = Path(DIRECTORY) / "voc_memos.json"
+        try:
+            with open(memo_file, "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2)
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -555,6 +803,14 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         # 표준 로깅
         sys.stderr.write(f"[{self.log_date_time_string()}] {format % args}\n")
 
+    def handle_one_request(self):
+        try:
+            super().handle_one_request()
+        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+            pass
+        except Exception as e:
+            sys.stderr.write(f"[{datetime.now()}] Request error: {e}\n")
+
 def start_cloudflare_tunnel():
     try:
         if not CLOUDFLARED_BIN.exists():
@@ -564,34 +820,65 @@ def start_cloudflare_tunnel():
         import re
 
         def _worker():
-            cmd = [str(CLOUDFLARED_BIN), "tunnel", "--url", f"http://localhost:{PORT}"]
-            try:
-                proc = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    encoding="utf-8",
-                    errors="ignore"
-                )
-                tunnel_info["proc"] = proc
-                url_file = Path(DIRECTORY) / "public_url.txt"
+            import time
+            url_file = Path(DIRECTORY) / "public_url.txt"
+            
+            # 1. 기존에 이미 떠 있는 터널 및 URL이 유효하면 그대로 재사용
+            if url_file.exists():
+                try:
+                    existing_url = url_file.read_text(encoding="utf-8").strip()
+                    if existing_url.startswith("https://"):
+                        tunnel_info["url"] = existing_url
+                        print("--------------------------------------------------")
+                        print(f" ★ [기존 외부 공유 주소 유지 및 재사용] -> {existing_url}")
+                        print("--------------------------------------------------")
+                except Exception:
+                    pass
 
-                for line in proc.stdout:
-                    m = re.search(r'https://[a-zA-Z0-9-]+\.trycloudflare\.com', line)
-                    if m:
-                        tunnel_url = m.group(0)
-                        tunnel_info["url"] = tunnel_url
-                        print("--------------------------------------------------")
-                        print(f" ★ [외부/모바일 공유 주소 발급 완료] -> {tunnel_url}")
-                        print("--------------------------------------------------")
-                        try:
-                            with open(url_file, "w", encoding="utf-8") as f:
-                                f.write(tunnel_url + "\n")
-                        except Exception:
-                            pass
-            except Exception as e:
-                print(f"[경고] Cloudflare 터널 실행 실패: {e}")
+            while True:
+                # 이미 유효한 터널 프로세스가 실행 중인지 확인
+                import urllib.request
+                cur_url = tunnel_info.get("url")
+                if cur_url:
+                    try:
+                        req = urllib.request.Request(cur_url, headers={"User-Agent": "HealthCheck"})
+                        with urllib.request.urlopen(req, timeout=4) as res:
+                            if res.status in (200, 302, 403, 404):
+                                # 터널 정상 동작 중이면 대기
+                                time.sleep(10)
+                                continue
+                    except Exception:
+                        pass
+
+                cmd = [str(CLOUDFLARED_BIN), "tunnel", "--url", f"http://localhost:{PORT}"]
+                try:
+                    proc = subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        encoding="utf-8",
+                        errors="ignore"
+                    )
+                    tunnel_info["proc"] = proc
+
+                    for line in proc.stdout:
+                        m = re.search(r'https://[a-zA-Z0-9-]+\.trycloudflare\.com', line)
+                        if m:
+                            tunnel_url = m.group(0)
+                            tunnel_info["url"] = tunnel_url
+                            print("--------------------------------------------------")
+                            print(f" ★ [외부/모바일 공유 주소 발급 완료] -> {tunnel_url}")
+                            print("--------------------------------------------------")
+                            try:
+                                with open(url_file, "w", encoding="utf-8") as f:
+                                    f.write(tunnel_url + "\n")
+                            except Exception:
+                                pass
+                    proc.wait()
+                except Exception as e:
+                    print(f"[경고] Cloudflare 터널 실행 실패: {e}")
+                time.sleep(5)
 
         t = threading.Thread(target=_worker, daemon=True)
         t.start()
@@ -605,18 +892,24 @@ class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
 if __name__ == "__main__":
     os.chdir(DIRECTORY)
     start_cloudflare_tunnel()
-    # 0.0.0.0 바인딩으로 로컬 및 사내 IP 접속 모두 허용 (멀티스레드 지원)
-    with ThreadedTCPServer(("0.0.0.0", PORT), CustomHandler) as httpd:
-        cur_ip = get_local_ip()
-        print("==================================================")
-        print("[START] 베베숲 VOC 대시보드 항시 가동 서버 시작!")
-        print(f" - 로컬 PC 접속:     http://localhost:{PORT}")
-        print(f" - 사내 와이파이:    http://{cur_ip}:{PORT}")
-        print(f" - 외부/재택/모바일:  Cloudflare 보안 터널 주소 연결 중...")
-        print("==================================================")
+    start_gdrive_auto_sync(interval_seconds=1800)
+    import time
+    while True:
         try:
-            httpd.serve_forever()
+            with ThreadedTCPServer(("0.0.0.0", PORT), CustomHandler) as httpd:
+                cur_ip = get_local_ip()
+                print("==================================================")
+                print("[START] 베베숲 VOC 대시보드 항시 가동 서버 시작!")
+                print(f" - 로컬 PC 접속:     http://localhost:{PORT}")
+                print(f" - 사내 와이파이:    http://{cur_ip}:{PORT}")
+                print(f" - 외부/재택/모바일:  Cloudflare 보안 터널 주소 연결 중...")
+                print("==================================================")
+                httpd.serve_forever()
         except KeyboardInterrupt:
-            print("\nServer stopped.")
+            print("\nServer stopped by user.")
             if tunnel_info.get("proc"):
                 tunnel_info["proc"].terminate()
+            break
+        except Exception as e:
+            sys.stderr.write(f"[{datetime.now()}] Server exception: {e}. Retrying in 2s...\n")
+            time.sleep(2)

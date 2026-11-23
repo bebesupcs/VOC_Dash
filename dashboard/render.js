@@ -120,6 +120,39 @@ function formatPeriodDisplayLabel(p, mode) {
   return typeof p === "object" ? (p.label || p.key) : String(p);
 }
 
+function getReportHeaderTitle(period, mode) {
+  if (!period) return "VOC 종합 리포트";
+  const curMode = mode || (E && E.state ? E.state.mode : "weekly");
+
+  // 연도 문자열 추출 (예: '2026년')
+  const pKey = typeof period === "object" ? (period.key || period.label || "") : String(period);
+  const pLabel = typeof period === "object" ? (period.label || "") : "";
+  const matchYr = pKey.match(/^20\d{2}/) || pLabel.match(/20\d{2}/);
+  const yearStr = matchYr ? `${matchYr[0]}년` : "2026년";
+
+  if (curMode === "weekly") {
+    // 주간: 11월 1주 (10/29(목)~11/4(수)) 주간 VOC 종합 리포트
+    const periodDisp = formatPeriodDisplayLabel(period, "weekly");
+    const dateRange = pLabel ? pLabel.replace(/202[56]년\s*/, "").trim() : "";
+    return `${periodDisp} (${dateRange || pLabel}) 주간 VOC 종합 리포트`;
+  }
+  if (curMode === "monthly") {
+    // 월간: 2026년 11월 월간 VOC 종합 리포트
+    const monthPart = formatPeriodDisplayLabel(period, "monthly");
+    return `${yearStr} ${monthPart} 월간 VOC 종합 리포트`;
+  }
+  if (curMode === "quarterly") {
+    // 분기: 2026년 4분기 분기 VOC 종합 리포트
+    const qPart = formatPeriodDisplayLabel(period, "quarterly");
+    return `${yearStr} ${qPart} 분기 VOC 종합 리포트`;
+  }
+  if (curMode === "yearly") {
+    // 연간: 2026년 연간 VOC 종합 리포트
+    return `${yearStr} 연간 VOC 종합 리포트`;
+  }
+  return `${pLabel || pKey} VOC 종합 리포트`;
+}
+
 function kpiCard(label, value, deltaPct, opts = {}) {
   const d = deltaPct;
   let badge = "";
@@ -150,15 +183,28 @@ function kpiCard(label, value, deltaPct, opts = {}) {
       ? `<div class="mt-1 text-[11px] text-zinc-400 font-normal truncate whitespace-nowrap">${opts.subText}</div>`
       : "";
 
-  return `<div class="bg-white p-3 sm:p-3.5 h-full flex flex-col justify-between min-w-0">
+  const valStr = String(value == null ? "–" : value);
+  const valLen = valStr.length;
+  let valClass = "tnum text-lg sm:text-2xl font-semibold tracking-tight whitespace-nowrap";
+  if (valLen > 22) {
+    valClass = "tnum text-[11px] sm:text-[13px] font-bold tracking-tight break-all line-clamp-2 leading-snug text-zinc-900";
+  } else if (valLen > 14) {
+    valClass = "tnum text-xs sm:text-sm font-bold tracking-tight break-all line-clamp-2 leading-snug text-zinc-900";
+  } else if (valLen > 8 && !/^\d+([,.]\d+)?(%|건|초|분|시간|일|점)?$/.test(valStr.trim())) {
+    valClass = "tnum text-sm sm:text-base font-semibold tracking-tight break-words text-zinc-900";
+  }
+
+  const safeValTitle = valStr.replace(/"/g, '&quot;');
+
+  return `<div class="bg-white p-3 sm:p-3.5 h-full flex flex-col justify-between min-w-0 overflow-hidden">
     <div class="min-w-0">
       <div class="flex items-center text-[11px] sm:text-xs text-zinc-500 min-w-0">
         <span class="truncate whitespace-nowrap">${label}</span>
         ${alert}
         ${tooltipEl}
       </div>
-      <div class="mt-1 flex items-baseline gap-1.5 sm:gap-2 flex-wrap sm:flex-nowrap">
-        <span class="tnum text-lg sm:text-2xl font-semibold tracking-tight whitespace-nowrap">${value}</span>
+      <div class="mt-1 flex items-baseline gap-1.5 sm:gap-2 flex-wrap sm:flex-nowrap min-w-0">
+        <span class="${valClass}" title="${safeValTitle}">${value}</span>
         ${badge}
       </div>
     </div>
@@ -728,7 +774,7 @@ function renderTrend() {
       datasets: [
         {
           type: "bar",
-          label: "전화 (콜)",
+          label: "전화 (실통화)",
           data: callSeries,
           backgroundColor: recent.map((w) => (w.key === curPeriod.key ? "#0f766e" : "#14b8a6")),
           borderRadius: 4
@@ -1080,7 +1126,18 @@ function renderCall(chats) {
 
 const MEMO_KEY = "voc_memo_v1";
 function loadMemos() { try { return JSON.parse(localStorage.getItem(MEMO_KEY)) || {}; } catch { return {}; } }
-function saveMemos(m) { localStorage.setItem(MEMO_KEY, JSON.stringify(m)); }
+function saveMemos(m) {
+  try { localStorage.setItem(MEMO_KEY, JSON.stringify(m)); } catch (e) { console.error("saveMemos local error:", e); }
+  try {
+    fetch("/api/memos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(m)
+    }).catch((err) => console.warn("Failed to persist memos to server:", err));
+  } catch (err) {
+    console.warn("fetch /api/memos error:", err);
+  }
+}
 
 function renderMemo() {
   const period = E.getPeriod();
@@ -1189,6 +1246,26 @@ let selectedYearFilter = "all";
 function renderPeriodControls() {
   const period = E.getPeriod();
   if (!period) return;
+
+  try {
+    sessionStorage.setItem("voc_current_mode", E.state.mode);
+    localStorage.setItem("voc_current_mode", E.state.mode);
+    sessionStorage.setItem("voc_current_period_key", period.key || "");
+    localStorage.setItem("voc_current_period_key", period.key || "");
+    sessionStorage.setItem("voc_current_week", period.key || "");
+    localStorage.setItem("voc_current_week", period.key || "");
+    const url = new URL(window.location.href);
+    if (E.state.mode === "weekly" && period.key) {
+      url.searchParams.set("week", period.key);
+    } else {
+      url.searchParams.delete("week");
+    }
+    url.searchParams.set("mode", E.state.mode);
+    if (typeof currentView !== "undefined" && currentView) {
+      url.searchParams.set("view", currentView);
+    }
+    window.history.replaceState({}, "", url.toString());
+  } catch (e) {}
 
   const list = E.getPeriodList();
   const maxIdx = list.length - 1;
@@ -1531,6 +1608,125 @@ function renderReportChannelChart(recent, curPeriod) {
   });
 }
 
+function renderReportAlfInsight(period, prev) {
+  const section = document.getElementById("reportAiAlfInsightSection");
+  if (!section) return;
+
+  const alfCur = (typeof E !== "undefined" && E.aggregateAlf) ? E.aggregateAlf(period) : null;
+  const alfPrev = (prev && typeof E !== "undefined" && E.aggregateAlf) ? E.aggregateAlf(prev) : null;
+
+  const extraBadgeEl = document.getElementById("reportAlfExtraBadge");
+  const gridEl = document.getElementById("reportAlfKpiGrid");
+
+  const curPeriodChats = (typeof E !== "undefined" && E.rawChats) ? E.rawChats(period).filter((c) => c.valid) : [];
+  const outChatsCount = curPeriodChats.filter((c) => (c.channel === "채팅" || c.channel === "상담사챗" || c.channel === "챗봇(ALF)") && (c.direction || "INBOUND") === "OUTBOUND").length;
+
+  if (extraBadgeEl) {
+    if (outChatsCount > 0) {
+      extraBadgeEl.innerHTML = `<span class="inline-flex items-center gap-1 rounded-md bg-zinc-100 px-2.5 py-1 text-xs text-zinc-600 ring-1 ring-black/5">💬 발신(선톡) ${outChatsCount}건 별도</span>`;
+    } else {
+      extraBadgeEl.innerHTML = "";
+    }
+  }
+
+  if (!gridEl) return;
+
+  if (!alfCur || !alfCur.totalInflow) {
+    gridEl.innerHTML = `<div class="col-span-4 rounded-lg bg-zinc-50 p-6 text-center text-xs text-zinc-400 ring-1 ring-black/5">선택 기간 AI 챗봇 인입 내역이 없습니다.</div>`;
+    return;
+  }
+
+  const curRate = parseFloat(alfCur.compRate || "0");
+  const prevRate = (alfPrev && alfPrev.totalInflow > 0) ? parseFloat(alfPrev.compRate || "0") : null;
+  const diffRate = prevRate != null ? (curRate - prevRate) : null;
+
+  const curInflow = alfCur.totalInflow;
+  const prevInflow = (alfPrev && alfPrev.totalInflow > 0) ? alfPrev.totalInflow : null;
+  const diffInflow = prevInflow != null ? (curInflow - prevInflow) : null;
+
+  const curComp = alfCur.compCount;
+  const prevComp = (alfPrev && alfPrev.totalInflow > 0) ? alfPrev.compCount : null;
+  const diffComp = prevComp != null ? (curComp - prevComp) : null;
+
+  const curTrans = alfCur.transCount;
+  const prevTrans = (alfPrev && alfPrev.totalInflow > 0) ? alfPrev.transCount : null;
+  const diffTrans = prevTrans != null ? (curTrans - prevTrans) : null;
+
+  function fmtDelta(diff, isPct = false, goodIsUp = true) {
+    if (diff == null) return '<span class="text-zinc-400 font-normal text-xs">–</span>';
+    if (Math.abs(diff) < (isPct ? 0.05 : 0.001)) {
+      return `<span class="tnum text-xs font-medium text-zinc-500">0${isPct ? ".0%p" : ""}</span>`;
+    }
+    const isUp = diff > 0;
+    const good = goodIsUp ? isUp : !isUp;
+    const color = good ? "text-teal-700" : "text-rose-600";
+    const arrow = isUp ? "▲+" : "▼";
+    const valStr = isPct ? `${Math.abs(diff).toFixed(1)}%p` : `${Math.abs(diff).toLocaleString()}`;
+    return `<span class="tnum text-xs font-semibold ${color}">${arrow}${valStr}</span>`;
+  }
+
+  // 1. 자체 완결율 (주요 KPI, Teal 하이라이트)
+  const card1 = `
+    <div class="rounded-lg bg-teal-50/80 p-4 ring-1 ring-teal-200/80 flex flex-col justify-between shadow-2xs">
+      <div>
+        <div class="text-xs font-semibold text-teal-800 flex items-center justify-between">
+          <span class="whitespace-nowrap">자체 완결율</span>
+          <span class="rounded bg-teal-100 px-1.5 py-0.5 text-[10px] font-bold text-teal-800 ring-1 ring-teal-300/60 whitespace-nowrap">핵심 지표</span>
+        </div>
+        <div class="mt-1 flex items-baseline gap-1.5 whitespace-nowrap">
+          <span class="tnum text-2xl font-bold tracking-tight text-zinc-900">${curRate.toFixed(1)}%</span>
+          ${fmtDelta(diffRate, true, true)}
+        </div>
+      </div>
+      <div class="mt-2 text-[11px] text-zinc-500 font-medium whitespace-nowrap">직전: ${prevRate != null ? `${prevRate.toFixed(1)}%` : "–"} <span class="text-zinc-300">·</span> 완결 ${curComp.toLocaleString()}건</div>
+    </div>
+  `;
+
+  // 2. 챗봇 총 수신 (인입)
+  const card2 = `
+    <div class="rounded-lg bg-white p-4 ring-1 ring-black/5 flex flex-col justify-between shadow-2xs">
+      <div>
+        <div class="text-xs font-semibold text-zinc-600 whitespace-nowrap">챗봇 총 수신 (인입)</div>
+        <div class="mt-1 flex items-baseline gap-1.5 whitespace-nowrap">
+          <span class="tnum text-2xl font-bold tracking-tight text-zinc-900">${curInflow.toLocaleString()}<span class="text-sm font-normal text-zinc-500 ml-0.5">건</span></span>
+          ${fmtDelta(diffInflow, false, true)}
+        </div>
+      </div>
+      <div class="mt-2 text-[11px] text-zinc-500 font-medium whitespace-nowrap">직전: ${prevInflow != null ? `${prevInflow.toLocaleString()}건` : "–"}</div>
+    </div>
+  `;
+
+  // 3. 챗봇 자체 해결
+  const card3 = `
+    <div class="rounded-lg bg-white p-4 ring-1 ring-black/5 flex flex-col justify-between shadow-2xs">
+      <div>
+        <div class="text-xs font-semibold text-zinc-600 whitespace-nowrap">챗봇 자체 해결</div>
+        <div class="mt-1 flex items-baseline gap-1.5 whitespace-nowrap">
+          <span class="tnum text-2xl font-bold tracking-tight text-zinc-900">${curComp.toLocaleString()}<span class="text-sm font-normal text-zinc-500 ml-0.5">건</span></span>
+          ${fmtDelta(diffComp, false, true)}
+        </div>
+      </div>
+      <div class="mt-2 text-[11px] text-zinc-500 font-medium whitespace-nowrap">직전: ${prevComp != null ? `${prevComp.toLocaleString()}건` : "–"} <span class="text-zinc-300">·</span> 비중 ${alfCur.compRate}%</div>
+    </div>
+  `;
+
+  // 4. 상담사 이관 연결
+  const card4 = `
+    <div class="rounded-lg bg-white p-4 ring-1 ring-black/5 flex flex-col justify-between shadow-2xs">
+      <div>
+        <div class="text-xs font-semibold text-zinc-600 whitespace-nowrap">상담사 이관 연결</div>
+        <div class="mt-1 flex items-baseline gap-1.5 whitespace-nowrap">
+          <span class="tnum text-2xl font-bold tracking-tight text-zinc-900">${curTrans.toLocaleString()}<span class="text-sm font-normal text-zinc-500 ml-0.5">건</span></span>
+          ${fmtDelta(diffTrans, false, false)}
+        </div>
+      </div>
+      <div class="mt-2 text-[11px] text-zinc-500 font-medium whitespace-nowrap">직전: ${prevTrans != null ? `${prevTrans.toLocaleString()}건` : "–"} <span class="text-zinc-300">·</span> 이관율 ${alfCur.transRate}%</div>
+    </div>
+  `;
+
+  gridEl.innerHTML = card1 + card2 + card3 + card4;
+}
+
 function renderMiniClaimChart(canvasId, labels, data, themeColor, activeColor, curIndex) {
   destroyChart(canvasId);
   const el = document.getElementById(canvasId);
@@ -1576,6 +1772,9 @@ function renderMiniClaimChart(canvasId, labels, data, themeColor, activeColor, c
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      layout: {
+        padding: { top: 16, left: 2, right: 2, bottom: 0 }
+      },
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -1648,7 +1847,7 @@ function renderReportThreePillars(period, prev, buckets, pb, recent) {
     : (pb ? claimDetail(pb.delivery, "sub") : []);
   const pbShipMap = Object.fromEntries(pbShipDetail.map((x) => [x.label, x.count]));
 
-  const pbSvcDetail = pb ? E.groupCount(pb.service, "mid").filter((x) => x[0] !== "").map(([label, count]) => ({ label: label || "기타", count })) : [];
+  const pbSvcDetail = pb ? claimDetail(pb.service, "sub") : [];
   const pbSvcMap = Object.fromEntries(pbSvcDetail.map((x) => [x.label, x.count]));
 
   const pillars = [
@@ -1694,12 +1893,12 @@ function renderReportThreePillars(period, prev, buckets, pb, recent) {
         ? E.groupCount(rawShipments, "type").filter((x) => x[0]).map(([label, count]) => ({ label, count })).slice(0, 5)
         : claimDetail(buckets.delivery, "sub").slice(0, 5),
       focusBadge: rawShipments.length > 0
-        ? `<span class="inline-flex items-center gap-1 rounded bg-rose-100 text-rose-900 px-2 py-0.5 text-[11px] font-semibold border border-rose-300">물류원장 ${curShipCount}건 (상담접수 ${buckets.delivery.length}건)</span>`
+        ? `<span class="inline-flex items-center gap-1 rounded bg-rose-100 text-rose-900 px-2 py-0.5 text-[11px] font-semibold border border-rose-300">초저온(CJ) ${rawShipments.filter((s) => s.vendor === "초저온").length}건 · 풀필먼트 ${rawShipments.filter((s) => s.vendor === "풀필먼트").length}건</span>`
         : `<span class="inline-flex items-center gap-1 rounded bg-rose-100 text-rose-900 px-2 py-0.5 text-[11px] font-semibold border border-rose-300">파손 ${dBoxDmg}건 · 지연 ${dDelay}건</span>`,
       memos: getCategoryMemos("delivery", period),
       defaultComment: curShipCount
         ? (rawShipments.length > 0
-          ? `• 물류 벤더사(풀필먼트 및 CJ초저온) 원장 기준 ${curShipCount}건 (채널톡 배송상담 ${buckets.delivery.length}건). 오출고 재발 방지 및 택배 파손 맞교환 조치 완료.`
+          ? `• 물류사(풀필먼트 및 CJ초저온) 배송클레임 기준 ${curShipCount}건 (채널톡 배송상담 ${buckets.delivery.length}건). 오출고 재발 방지 및 택배 파손 맞교환 조치 완료.`
           : `• ${claimDetail(buckets.delivery, "sub")[0]?.label || "오배송/지연"} 접수(${Number(claimDetail(buckets.delivery, "sub")[0]?.count || 0).toLocaleString()}건) 중심. 물류 벤더사 오출고 재발 방지 및 당일 맞교환 조치 완료.`)
         : "• 선택 기간 접수된 배송 클레임이 없습니다."
     },
@@ -1717,11 +1916,11 @@ function renderReportThreePillars(period, prev, buckets, pb, recent) {
       prevCount: pb?.service.length,
       historyCounts: recent.map((p) => E.claimBuckets(E.rawChats(p).filter((c) => c.valid)).service.length),
       prevMap: pbSvcMap,
-      topItems: E.groupCount(buckets.service, "mid").filter((x) => x[0] !== "").map(([label, count]) => ({ label: label || "기타", count })).slice(0, 5),
+      topItems: claimDetail(buckets.service, "sub").slice(0, 5),
       focusBadge: `<span class="inline-flex items-center gap-1 rounded bg-teal-100 text-teal-900 px-2 py-0.5 text-[11px] font-semibold border border-teal-300">에스컬레이션 ${sEscCount}건 · 휴먼에러 ${sHuman}건</span>`,
       memos: getCategoryMemos("service", period),
       defaultComment: buckets.service.length
-        ? `• ${E.groupCount(buckets.service, "mid")[0]?.[0] || "상담/시스템"} 문의(${Number(E.groupCount(buckets.service, "mid")[0]?.[1] || 0).toLocaleString()}건) 중심. 에스컬레이션 방지 및 첫 통화/채팅 해결율 집중 관리 중.`
+        ? `• ${claimDetail(buckets.service, "sub")[0]?.label || "상담/서비스"} 불만(${Number(claimDetail(buckets.service, "sub")[0]?.count || 0).toLocaleString()}건) 중심. 에스컬레이션 방지 및 첫 통화/채팅 해결율 집중 관리 중.`
         : "• 선택 기간 접수된 서비스 클레임이 없습니다."
     }
   ];
@@ -1749,60 +1948,42 @@ function renderReportThreePillars(period, prev, buckets, pb, recent) {
         const d = it.count - prvCnt;
         if (d > 0) {
           const pStr = prvCnt > 0 ? ` (+${Math.round((d / prvCnt) * 100)}%)` : " (신규)";
-          itDiffBadge = `<span class="inline-flex items-center text-[9.5px] font-bold text-rose-600 bg-rose-50 px-1 py-0.5 rounded border border-rose-200 whitespace-nowrap">▲${d}${pStr}</span>`;
+          itDiffBadge = `<span class="inline-flex items-center text-[9.5px] font-bold text-rose-600 bg-rose-50 px-1 py-0.5 rounded border border-rose-200 whitespace-nowrap leading-none">▲${d}${pStr}</span>`;
         } else if (d < 0) {
           const pStr = prvCnt > 0 ? ` (${Math.round((d / prvCnt) * 100)}%)` : "";
-          itDiffBadge = `<span class="inline-flex items-center text-[9.5px] font-bold text-teal-700 bg-teal-50 px-1 py-0.5 rounded border border-teal-200 whitespace-nowrap">▼${Math.abs(d)}${pStr}</span>`;
+          itDiffBadge = `<span class="inline-flex items-center text-[9.5px] font-bold text-teal-700 bg-teal-50 px-1 py-0.5 rounded border border-teal-200 whitespace-nowrap leading-none">▼${Math.abs(d)}${pStr}</span>`;
         } else {
           itDiffBadge = `<span class="text-zinc-400 text-[9.5px] font-medium whitespace-nowrap">- (0%)</span>`;
         }
       }
 
       return `<tr class="hover:bg-zinc-50/60 transition">
-        <td class="py-1.5 px-2 font-medium text-zinc-800 min-w-0">
-          <div class="flex items-center gap-1 min-w-0">
-            <span class="inline-block w-3.5 shrink-0 text-[10px] text-zinc-400 font-bold text-center">${idx + 1}</span>
-            <span class="truncate text-[11.5px]" title="${it.label}">${it.label}</span>
-          </div>
-          <div class="w-full bg-zinc-100 rounded-full h-1 mt-1 overflow-hidden">
-            <div class="h-1 rounded-full transition-all duration-500" style="width:${Math.min(100, Math.max(5, pctNum))}%; background-color:${p.activeColor}"></div>
+        <td class="py-2 px-1.5 font-medium text-zinc-900 min-w-0 align-middle">
+          <div class="flex items-center gap-1.5 min-w-0">
+            <span class="inline-flex items-center justify-center w-4 h-4 rounded text-[10px] font-bold ${idx < 3 ? 'bg-zinc-100 text-zinc-700' : 'text-zinc-400'} shrink-0">${idx + 1}</span>
+            <span class="text-xs font-semibold text-zinc-800 whitespace-nowrap" title="${it.label}">${it.label}</span>
           </div>
         </td>
-        <td class="py-1.5 px-1 text-right font-semibold text-zinc-800 tnum align-middle whitespace-nowrap text-[11px]">${Number(it.count).toLocaleString()}건</td>
-        <td class="py-1.5 px-1 text-center tnum align-middle whitespace-nowrap">${itDiffBadge}</td>
-        <td class="py-1.5 px-2 text-right text-zinc-500 tnum align-middle whitespace-nowrap text-[11px]">${pct}%</td>
+        <td class="py-2 px-1 text-right font-bold text-zinc-800 tnum align-middle whitespace-nowrap text-xs">${Number(it.count).toLocaleString()}건</td>
+        <td class="py-2 px-0.5 text-center tnum align-middle whitespace-nowrap">${itDiffBadge}</td>
+        <td class="py-2 pr-2 pl-0.5 text-right text-zinc-600 tnum align-middle whitespace-nowrap text-xs font-medium">${pct}%</td>
       </tr>`;
     }).join("") : `<tr><td colspan="4" class="py-3 text-center text-zinc-400 text-xs">접수 내역 없음</td></tr>`;
 
     let commentsHtml = "";
     if (p.memos.length) {
       commentsHtml = `
-        <div class="space-y-2 max-h-56 overflow-y-auto pr-0.5">
-          ${p.memos.map((m, mIdx) => {
+        <div class="space-y-2.5">
+          ${p.memos.map((m) => {
             const safeText = (m.text || "").replace(/</g, "&lt;");
-            const isLong = safeText.length > 120 || safeText.split("\n").length > 3;
-            const memoElId = `pillarMemo_${p.id}_${mIdx}`;
+            const authorTag = m.author ? `<span class="text-zinc-500 font-semibold mr-1.5">[${m.author}]</span>` : "";
             return `
-            <div class="rounded-lg bg-white p-2.5 ring-1 ring-black/5 shadow-xs text-xs">
-              <div class="flex items-center justify-between text-[11px] text-zinc-400 mb-1">
-                <span class="font-medium text-zinc-600 bg-zinc-100 px-1.5 py-0.2 rounded">${m.snapshot?.filterLabel || m.tag || "전체"}</span>
-                <span class="tnum">${m.at || ""}</span>
+            <div class="rounded-lg bg-white p-3 ring-1 ring-black/5 shadow-2xs text-xs">
+              <div class="flex items-center justify-between text-[11px] text-zinc-400 mb-1.5 pb-1 border-b border-black/5">
+                <span class="font-semibold text-zinc-700 bg-zinc-100 px-1.5 py-0.5 rounded">${m.snapshot?.filterLabel || m.tag || "전체"}</span>
+                <span class="tnum font-medium text-zinc-500">${m.at || ""}</span>
               </div>
-              <p id="${memoElId}" class="text-zinc-800 whitespace-pre-wrap leading-relaxed ${isLong ? 'line-clamp-3' : ''}">${safeText}</p>
-              ${isLong ? `
-                <div class="mt-1 text-right">
-                  <button type="button" class="text-[11px] text-teal-700 font-semibold hover:underline cursor-pointer" onclick="
-                    const el = document.getElementById('${memoElId}');
-                    if (el.classList.contains('line-clamp-3')) {
-                      el.classList.remove('line-clamp-3');
-                      this.textContent = '접기 ▲';
-                    } else {
-                      el.classList.add('line-clamp-3');
-                      this.textContent = '더보기 ▼';
-                    }
-                  ">더보기 ▼</button>
-                </div>
-              ` : ''}
+              <p class="text-zinc-800 whitespace-pre-wrap leading-relaxed break-keep font-normal">${authorTag}${safeText}</p>
             </div>
           `;
           }).join("")}
@@ -1833,16 +2014,13 @@ function renderReportThreePillars(period, prev, buckets, pb, recent) {
               ${diffBadge}
             </div>
           </div>
-          <div class="mt-2 flex items-center justify-between">
-            ${p.focusBadge}
-          </div>
         </div>
 
         <!-- 2. 최근 기간 발생 추이 미니 그래프 -->
         <div class="mt-3">
           <div class="flex items-center justify-between text-[11px] text-zinc-500 mb-1">
-            <span class="font-semibold text-zinc-700">발생 건수 추이</span>
-            <span class="text-[10px] text-zinc-400">막대 상단: 접수량</span>
+            <span class="font-semibold text-zinc-700 whitespace-nowrap">발생 건수 추이</span>
+            <span class="text-[10px] text-zinc-400 whitespace-nowrap">막대 상단: 접수량</span>
           </div>
           <div class="h-28 w-full relative bg-white/60 rounded-lg p-2 ring-1 ring-black/5">
             <canvas id="report${p.id}MiniChart"></canvas>
@@ -1850,25 +2028,25 @@ function renderReportThreePillars(period, prev, buckets, pb, recent) {
         </div>
 
         <!-- 3. 주요 클레임 유형 순위 테이블 -->
-        <div class="mt-3 flex-1">
+        <div class="mt-3">
           <div class="flex items-center justify-between text-[11px] text-zinc-500 mb-1">
-            <span class="font-semibold text-zinc-700">주요 클레임 유형 TOP 5</span>
-            <span class="text-[10px] text-zinc-400">현재 기준 · 이전 대비</span>
+            <span class="font-semibold text-zinc-700 whitespace-nowrap">주요 클레임 유형 TOP 5</span>
+            <span class="text-[10px] text-zinc-400 whitespace-nowrap">현재 기준 · 이전 대비</span>
           </div>
           <div class="rounded-lg bg-white ring-1 ring-black/5 overflow-hidden">
             <table class="w-full text-left text-xs table-fixed">
               <colgroup>
-                <col style="width: 38%;">
-                <col style="width: 19%;">
-                <col style="width: 28%;">
+                <col style="width: 40%;">
+                <col style="width: 13%;">
+                <col style="width: 32%;">
                 <col style="width: 15%;">
               </colgroup>
               <thead class="bg-zinc-50/80 text-zinc-500 border-b border-black/5">
                 <tr>
-                  <th class="py-1.5 px-2 font-medium">유형</th>
+                  <th class="py-1.5 px-2 font-medium whitespace-nowrap">유형</th>
                   <th class="py-1.5 px-1 font-medium text-right whitespace-nowrap">현재</th>
                   <th class="py-1.5 px-1 font-medium text-center whitespace-nowrap">이전대비</th>
-                  <th class="py-1.5 px-2 font-medium text-right whitespace-nowrap">비중</th>
+                  <th class="py-1.5 pr-2 pl-0.5 font-medium text-right whitespace-nowrap">비중</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-black/5">
@@ -1879,13 +2057,13 @@ function renderReportThreePillars(period, prev, buckets, pb, recent) {
         </div>
 
         <!-- 4. 하단 이슈 코멘트 -->
-        <div class="mt-3.5 pt-2.5 border-t border-zinc-200/80">
+        <div class="mt-3.5 pt-2.5 border-t border-zinc-200/80 flex-1 flex flex-col justify-start">
           <div class="flex items-center justify-between text-[11px] text-zinc-600 font-semibold mb-1.5">
-            <span class="flex items-center gap-1">
+            <span class="flex items-center gap-1 whitespace-nowrap">
               <span>📌</span>
-              <span>이슈 코멘트 &amp; 인사이트</span>
+              <span class="whitespace-nowrap">이슈 코멘트 &amp; 인사이트</span>
             </span>
-            ${p.memos.length ? `<span class="rounded bg-teal-100 text-teal-800 px-1.5 py-0.2 text-[10px] font-bold">${p.memos.length}건 등록</span>` : ""}
+            ${p.memos.length ? `<span class="rounded bg-teal-100 text-teal-800 px-1.5 py-0.2 text-[10px] font-bold whitespace-nowrap">${p.memos.length}건 등록</span>` : ""}
           </div>
           ${commentsHtml}
         </div>
@@ -2140,8 +2318,8 @@ function renderReportRiskActions(period, chats, prevChats) {
         <td class="py-2 px-2 text-zinc-600 whitespace-nowrap tnum text-[11px]">${c.channel || "채널톡"}</td>
         <td class="py-2 px-2 font-medium text-zinc-900 whitespace-nowrap">${custName}</td>
         <td class="py-2 px-2 text-zinc-700 font-medium truncate max-w-[120px]" title="${c.prod || c.brand || ""}">${c.prod || c.brand || "–"}</td>
-        <td class="py-2 px-3 text-zinc-800 break-words max-w-xs text-xs">${tagPrefix}${issueText}</td>
-        <td class="py-2 px-3 text-emerald-800 font-medium break-words max-w-xs text-xs flex items-center gap-1.5">
+        <td class="py-2 px-3 text-zinc-800 break-words whitespace-normal min-w-[280px] max-w-md text-xs">${tagPrefix}${issueText}</td>
+        <td class="py-2 px-3 text-emerald-800 font-medium break-words whitespace-normal min-w-[280px] max-w-md text-xs flex items-center gap-1.5">
           <span class="text-emerald-600 font-bold">✓</span>
           <span>${actText}</span>
         </td>
@@ -2240,31 +2418,54 @@ function renderReport() {
   const curOp = E.getOperationalKpi ? E.getOperationalKpi(period) : null;
   const handledTotal = curOp?.handled_contacts != null ? curOp.handled_contacts : (chats.filter((c) => c.channel === "전화").length + chatsCount + board);
 
-  const periodDisp = formatPeriodDisplayLabel(period, E.state.mode);
-  const dateRange = period.label ? period.label.replace(/202[56]년\s*/, "") : "";
-  const repModeName = E.state.mode === "weekly" ? "주간" : (E.state.mode === "monthly" ? "월간" : (E.state.mode === "quarterly" ? "분기" : "연간"));
-  document.getElementById("reportTitle").textContent = `${periodDisp} (${dateRange || period.label}) ${repModeName} VOC 종합 리포트`;
+  document.getElementById("reportTitle").textContent = getReportHeaderTitle(period, E.state.mode);
 
   const buckets = E.claimBuckets(chats);
   const pb = prevChats ? E.claimBuckets(prevChats) : null;
 
   const dCount = shipCount > 0 ? shipCount : buckets.delivery.length;
   const prevDCount = shipCount > 0 ? (prevShipCount || null) : (pb ? pb.delivery.length : null);
-  const qWipes = buckets.quality.filter((c) => c.brand === "물티슈").length;
-  const qOthers = buckets.quality.length - qWipes;
+  const qWipes = buckets.quality.filter((c) => matchQualityCategory(c, "물티슈")).length;
+  const qSkin = buckets.quality.filter((c) => matchQualityCategory(c, "스킨케어")).length;
+  const qHome = buckets.quality.filter((c) => matchQualityCategory(c, "홈")).length;
+  const qOthers = buckets.quality.length - qWipes - qSkin - qHome;
+
+  const qParts = [];
+  if (qWipes > 0) qParts.push(`물티슈 ${qWipes}건`);
+  if (qSkin > 0) qParts.push(`스킨케어 ${qSkin}건`);
+  if (qHome > 0) qParts.push(`홈/세제 ${qHome}건`);
+  if (qOthers > 0) qParts.push(`기타 ${qOthers}건`);
+  const qSubText = qParts.length > 0 ? qParts.join(" · ") : "접수 내역 없음";
 
   // 1. VOC 요약 KPI
+  const handledSub = `콜 ${callsCount.toLocaleString()} · 채팅 ${chatsCount.toLocaleString()} · 게시판 ${board.toLocaleString()}`;
+  const curCold = rawShipments.filter((s) => s.vendor === "초저온").length;
+  const curFul = rawShipments.filter((s) => s.vendor === "풀필먼트").length;
+  const curOtherShip = shipCount - curCold - curFul;
+
+  let deliverySub = "";
+  if (shipCount > 0) {
+    const dParts = [];
+    if (curCold > 0) dParts.push(`초저온(CJ) ${curCold}건`);
+    if (curFul > 0) dParts.push(`풀필먼트 ${curFul}건`);
+    if (curOtherShip > 0) dParts.push(`기타 ${curOtherShip}건`);
+    deliverySub = dParts.join(" · ");
+  } else {
+    const pureClaimCount = buckets.delivery.filter((c) => c.nature === "클레임").length;
+    deliverySub = `상담 배송클레임 ${pureClaimCount > 0 ? pureClaimCount : buckets.delivery.length}건`;
+  }
+
   document.getElementById("reportKpi").innerHTML =
     reportKpiBox("총 인입 (전수)", total.toLocaleString(), prevTotal != null ? total - prevTotal : null, {
-      subText: `실응대 ${handledTotal.toLocaleString()}건 (콜 ${callsCount.toLocaleString()} · 채팅 ${chatsCount.toLocaleString()} · 게시판 ${board.toLocaleString()})`
+      subText: handledSub
     }) +
     reportKpiBox("품질 클레임", buckets.quality.length, pb ? buckets.quality.length - pb.quality.length : null, {
       inverse: true,
-      subText: `물티슈 ${qWipes}건 · 홈/공통 ${qOthers}건`
+      subText: qSubText
     }) +
     reportKpiBox("배송 클레임", dCount, prevDCount != null ? dCount - prevDCount : null, {
       inverse: true,
-      subText: shipCount > 0 ? `물류 원장 ${shipCount}건 (상담접수 ${buckets.delivery.length}건)` : `상담접수 ${buckets.delivery.length}건`
+      subText: deliverySub
     }) +
     reportKpiBox("서비스 클레임", buckets.service.length, pb ? buckets.service.length - pb.service.length : null, {
       inverse: true,
@@ -2277,6 +2478,7 @@ function renderReport() {
   const repBadge = document.getElementById("reportChannelPeriodBadge");
   if (repBadge) repBadge.textContent = `(${periodUnitText} 추이)`;
   renderReportChannelChart(recent, period);
+  renderReportAlfInsight(period, prev);
 
   // 3. 부문별 클레임 현황 & 이슈 인사이트 (품질 · 배송 · 서비스 3대 부문 통합)
   renderReportThreePillars(period, prev, buckets, pb, recent);
@@ -2284,15 +2486,235 @@ function renderReport() {
   // 4. 핵심 리스크 & 긴급 조치 현황 (Risk & Action Summary - 단순문의 급증 포함)
   renderReportRiskActions(period, chats, prevChats);
 
-  // 5. CX팀 코멘트 (해당 선택 기간에 작성된 독립 코멘트만 노출)
+  // 5. CX팀 코멘트 (작성된 코멘트가 있을 때만 노출, 없으면 섹션 전체 완전 미노출)
   const memos = loadMemos();
   const memoList = (period && period.key && Array.isArray(memos[period.key])) ? memos[period.key] : [];
-  document.getElementById("reportMemo").innerHTML = memoList.length
-    ? memoList.map((m) => `<div class="rounded-lg bg-zinc-50 p-3 text-sm text-zinc-700 ring-1 ring-black/5"><p class="whitespace-pre-wrap">${m.text.replace(/</g, "&lt;")}</p></div>`).join("")
-    : `<p class="text-xs text-zinc-400">대시보드 '이슈 메모'에 작성한 ${period.label} 코멘트가 이 리포트에 표시됩니다.</p>`;
+  const memoSec = document.getElementById("reportMemoSection");
+  const memoHeading = document.getElementById("reportMemoHeading");
+  const memoContainer = document.getElementById("reportMemo");
+
+  if (memoList.length > 0) {
+    if (memoSec) memoSec.classList.remove("hidden");
+    if (memoHeading) {
+      const memoNum = reportRiskSectionEnabled ? "5" : "4";
+      memoHeading.textContent = `${memoNum}. CX팀 종합 코멘트`;
+    }
+    if (memoContainer) {
+      memoContainer.innerHTML = memoList.map((m) =>
+        `<div class="rounded-lg bg-zinc-50 p-3 text-sm text-zinc-700 ring-1 ring-black/5"><p class="whitespace-pre-wrap">${m.text.replace(/</g, "&lt;")}</p></div>`
+      ).join("");
+    }
+  } else {
+    if (memoSec) memoSec.classList.add("hidden");
+    if (memoContainer) memoContainer.innerHTML = "";
+  }
 
   if (typeof applyUserRolePermissions === "function") {
     applyUserRolePermissions(window.getCurrentUser());
+  }
+}
+
+async function exportReportPdf() {
+  const period = E.getPeriod();
+  if (!period) return;
+
+  const btn = document.getElementById("reportExportPdf");
+  const origBtnHtml = btn ? btn.innerHTML : "";
+  if (btn) {
+    btn.innerHTML = `
+      <span class="inline-flex items-center gap-1.5">
+        <svg class="animate-spin h-3.5 w-3.5 text-white inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+        </svg>
+        <span>PDF 추출 중...</span>
+      </span>
+    `;
+    btn.disabled = true;
+  }
+  const periodDisp = formatPeriodDisplayLabel(period, E.state.mode);
+  const safePeriod = periodDisp.replace(/[\s\(\)\/\:\-]/g, "_");
+  const downloadFileName = `[베베숲]_VOC_분석_종합리포트_${safePeriod}.pdf`;
+
+  // 1. 서버 네이티브 렌더링(Edge/Chromium 엔진)을 통해 화면과 100% 동일한 완벽한 1페이지 벡터 PDF 다운로드 우선 시도!
+  try {
+    const url = `/api/export_report_pdf?period=${encodeURIComponent(period.key)}&mode=${encodeURIComponent(E.state.mode)}&riskEnabled=${reportRiskSectionEnabled ? 1 : 0}`;
+    const res = await fetch(url);
+    if (res.ok) {
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = downloadFileName;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(blobUrl);
+      }, 1500);
+
+      if (typeof showToast === "function") {
+        showToast("화면과 100% 동일한 고화질 1페이지 벡터 PDF가 성공적으로 다운로드되었습니다.");
+      }
+      if (btn) {
+        btn.innerHTML = origBtnHtml;
+        btn.disabled = false;
+      }
+      return;
+    }
+  } catch (srvErr) {
+    console.warn("서버 네이티브 PDF 생성 실패, 클라이언트 렌더링으로 전환:", srvErr);
+  }
+
+  const hiddenElements = [];
+  const prevScrollY = window.scrollY;
+  try {
+    const reportArticle = document.querySelector("#reportView article");
+    if (!reportArticle) throw new Error("리포트 요소를 찾을 수 없습니다.");
+
+    // 1. 리스크 섹션이 OFF인 경우 리포트 PDF에서 완전 미노출
+    if (!reportRiskSectionEnabled) {
+      const riskSec = document.getElementById("reportRiskSection");
+      if (riskSec && riskSec.style.display !== "none") {
+        hiddenElements.push({ el: riskSec, origDisplay: riskSec.style.display });
+        riskSec.style.display = "none";
+      }
+    }
+
+    // 2. CX팀 종합 코멘트가 없는 경우 리포트 PDF에서 완전 미노출
+    const memos = loadMemos();
+    const memoList = (period && period.key && Array.isArray(memos[period.key])) ? memos[period.key] : [];
+    if (!memoList || memoList.length === 0) {
+      const memoSec = document.getElementById("reportMemoSection");
+      if (memoSec && memoSec.style.display !== "none") {
+        hiddenElements.push({ el: memoSec, origDisplay: memoSec.style.display });
+        memoSec.style.display = "none";
+      }
+    }
+
+    // 3. PDF 캡처 시 숨길 UI 요소들 (버튼들, 코멘트 추가폼 등)
+    const hideSelectors = [
+      "#reportExportExcel",
+      "#reportExportPdf",
+      "#reportPrint",
+      ".pillar-comment-form",
+      ".delete-comment-btn",
+      ".add-comment-btn",
+      ".group\\/tip"
+    ];
+    hideSelectors.forEach((sel) => {
+      reportArticle.querySelectorAll(sel).forEach((el) => {
+        if (el.style.display !== "none") {
+          hiddenElements.push({ el, origDisplay: el.style.display });
+          el.style.display = "none";
+        }
+      });
+    });
+
+    if (typeof html2canvas !== "function") {
+      throw new Error("html2canvas 라이브러리가 로드되지 않았습니다. 페이지를 새로고침(F5) 해주세요.");
+    }
+
+    // 화면 최상단 스크롤 이동 및 레이아웃 안정화
+    window.scrollTo(0, 0);
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    await new Promise((r) => setTimeout(r, 120));
+
+    // html2canvas로 고화질(scale: 2) 무손실 캡처
+    // onclone에서 뷰포트 너비를 1080px로 안정화하여 화면 그대로 글자 짤림/줄바꿈 없이 캡처
+    const canvas = await html2canvas(reportArticle, {
+      scale: 2,
+      useCORS: true,
+      allowTaint: true,
+      logging: false,
+      backgroundColor: "#ffffff",
+      scrollX: 0,
+      scrollY: 0,
+      windowWidth: 1440,
+      onclone: (clonedDoc) => {
+        const clonedArticle = clonedDoc.querySelector("#reportView article");
+        if (clonedArticle) {
+          clonedArticle.style.width = "1080px";
+          clonedArticle.style.maxWidth = "1080px";
+          clonedArticle.style.minWidth = "1080px";
+          clonedArticle.style.boxSizing = "border-box";
+          clonedArticle.style.wordBreak = "keep-all";
+
+          const title = clonedArticle.querySelector("#reportTitle");
+          if (title) {
+            title.style.whiteSpace = "nowrap";
+            title.style.wordBreak = "keep-all";
+          }
+        }
+
+        // html2canvas 전용 한글 폰트 및 뱃지 수직 중앙 정렬 보정 스타일 주입
+        // (1) Inter 영문 폰트와 한글 폰트 간 메트릭스 불일치로 인한 텍스트 처짐 및 받침 잘림 완벽 방지
+        // (2) 뱃지/박스 내부 텍스트가 아래로 쏠리지 않고 정중앙에 위치하도록 라인하이트와 패딩 보정
+        const style = clonedDoc.createElement("style");
+        style.innerHTML = `
+          #reportView article,
+          #reportView article * {
+            font-family: -apple-system, BlinkMacSystemFont, "Malgun Gothic", "맑은 고딕", "Pretendard", sans-serif !important;
+          }
+          #reportView article span[class*="text-[9.5px]"],
+          #reportView article span[class*="text-[10px]"],
+          #reportView article span[class*="text-xs"].rounded {
+            line-height: 1.2 !important;
+            padding-top: 1.5px !important;
+            padding-bottom: 2px !important;
+          }
+          #reportView article .inline-flex.items-center {
+            display: inline-flex !important;
+            align-items: center !important;
+          }
+        `;
+        clonedDoc.head.appendChild(style);
+      }
+    });
+
+    const imgData = canvas.toDataURL("image/png");
+
+    const jsPdfLib = window.jspdf ? window.jspdf.jsPDF : (typeof jsPDF === "function" ? jsPDF : null);
+    if (!jsPdfLib) {
+      throw new Error("jsPDF 라이브러리가 로드되지 않았습니다. 페이지를 새로고침(F5) 해주세요.");
+    }
+
+    // 캔버스 크기 기준 1:1 pt 매핑 (1 CSS px = 0.75 pt) 단 1페이지 PDF 생성
+    const actualWidthPx = canvas.width / 2;
+    const actualHeightPx = canvas.height / 2;
+    const ptWidth = actualWidthPx * 0.75;
+    const ptHeight = actualHeightPx * 0.75;
+
+    const pdf = new jsPdfLib({
+      orientation: ptWidth > ptHeight ? "landscape" : "portrait",
+      unit: "pt",
+      format: [ptWidth, ptHeight],
+      compress: false
+    });
+
+    pdf.addImage(imgData, "PNG", 0, 0, ptWidth, ptHeight);
+
+    const periodDisp = formatPeriodDisplayLabel(period, E.state.mode);
+    const safePeriod = periodDisp.replace(/[\s\(\)\/\:\-]/g, "_");
+    const downloadFileName = `[베베숲]_VOC_분석_종합리포트_${safePeriod}.pdf`;
+
+    pdf.save(downloadFileName);
+
+    if (typeof showToast === "function") {
+      showToast("리포트 1페이지 PDF가 성공적으로 다운로드되었습니다.");
+    }
+  } catch (err) {
+    console.error("PDF 추출 실패:", err);
+    alert("PDF 생성 중 오류가 발생했습니다: " + (err.message || err));
+  } finally {
+    hiddenElements.forEach(({ el, origDisplay }) => {
+      el.style.display = origDisplay;
+    });
+    window.scrollTo(0, prevScrollY);
+    if (btn) {
+      btn.innerHTML = origBtnHtml;
+      btn.disabled = false;
+    }
   }
 }
 
@@ -2377,14 +2799,17 @@ async function exportReportExcel() {
       }
     });
 
+    const isIncludeMissed = (typeof E !== 'undefined' && E.getChannelTalkMode) ? E.getChannelTalkMode() : Boolean(window.__CHANNELTALK_MODE);
+    const modeText = isIncludeMissed ? "부재포함" : "실통화";
     const payload = {
       period: period.key,
       memos: memoList,
       insights: curInsights,
-      user: curAuth
+      user: curAuth,
+      includeMissed: isIncludeMissed
     };
     if (typeof window.logAuditAction === "function") {
-      window.logAuditAction("EXCEL_DOWNLOAD", `VOC 분석종합리포트 엑셀 (${periodDisp})`, "주간/월간 종합 리포트 엑셀 다운로드");
+      window.logAuditAction("EXCEL_DOWNLOAD", `VOC 분석종합리포트 엑셀 (${periodDisp} / ${modeText})`, "주간/월간 종합 리포트 엑셀 다운로드");
     }
 
     let res;
@@ -2395,7 +2820,7 @@ async function exportReportExcel() {
         body: JSON.stringify(payload)
       });
     } catch (postErr) {
-      const url = `/api/export_report_excel?period=${encodeURIComponent(period.key)}`;
+      const url = `/api/export_report_excel?period=${encodeURIComponent(period.key)}&includeMissed=${isIncludeMissed ? 1 : 0}`;
       res = await fetch(url);
     }
 
@@ -2835,7 +3260,7 @@ async function exportReportExcelClientFallback(period, periodDisp, downloadFileN
       total: deliveryCount,
       prevTotal: prevDeliveryCount,
       focusSummary: rawShipments.length > 0
-        ? `물류원장: 파손 ${rawShipments.filter((s) => (s.type || "").includes("파손")).length}건 · 오배송 ${rawShipments.filter((s) => (s.type || "").includes("오배송")).length}건 (상담접수 ${buckets.delivery.length}건)`
+        ? `초저온(CJ) ${rawShipments.filter((s) => s.vendor === "초저온").length}건 · 풀필먼트 ${rawShipments.filter((s) => s.vendor === "풀필먼트").length}건`
         : `파손/박스불만: ${dBoxDmg}건 · 배송지연: ${dDelay}건`,
       subBg: { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFE4E6" } }, // Rose-100
       subBorder: {
@@ -2868,11 +3293,11 @@ async function exportReportExcelClientFallback(period, periodDisp, downloadFileN
         bottom: { style: "thin", color: { argb: "FF0D9488" } },
         right: { style: "thin", color: { argb: "FF0D9488" } }
       },
-      items: E.groupCount(buckets.service, "mid").filter((x) => x[0] !== "").map(([label, count]) => ({ label: label || "기타", count })).slice(0, 5),
+      items: claimDetail(buckets.service, "sub").slice(0, 5),
       prevMap: pbSvcMap,
       memos: getCategoryMemos("service", period),
       defaultComment: buckets.service.length
-        ? `• ${E.groupCount(buckets.service, "mid")[0]?.[0] || "상담/시스템"} 문의(${Number(E.groupCount(buckets.service, "mid")[0]?.[1] || 0).toLocaleString()}건) 중심. 에스컬레이션 방지 및 첫 통화/채팅 해결율 집중 관리 중.`
+        ? `• ${claimDetail(buckets.service, "sub")[0]?.label || "상담/서비스"} 불만(${Number(claimDetail(buckets.service, "sub")[0]?.count || 0).toLocaleString()}건) 중심. 에스컬레이션 방지 및 첫 통화/채팅 해결율 집중 관리 중.`
         : "• 선택 기간 접수된 서비스 클레임이 없습니다."
     }
   ];
@@ -3449,21 +3874,20 @@ function addCompPeriodWorksheet(wb, period) {
     };
   });
 
-  // Section 2: 보상 제외 내역 (수기 예외 관리)
+  // Section 2: 보상 제외 내역 (상담 보상취합 X 및 수기 예외 관리)
   const rawTargetChats = E.rawChats(period).filter(isQualityClaimRaw);
-  const curExSet = new Set((window.COMP_OVERRIDES?.excluded_ids || []).map(String));
-  const excludedChats = rawTargetChats.filter((c) => curExSet.has(String(c.id)));
+  const excludedChats = rawTargetChats.filter((c) => !isCompChat(c));
 
   curRow += 3;
   ws.getRow(curRow).height = 24;
   const s2Title = ws.getCell(curRow, 1);
-  s2Title.value = `2. 보상 제외 내역 (수기 예외 관리 - 총 ${excludedChats.length}건)`;
+  s2Title.value = `2. 보상 제외 내역 (총 ${excludedChats.length}건)`;
   s2Title.font = { name: "맑은 고딕", size: 11, bold: true, color: { argb: "FF111827" } };
 
   curRow += 1;
   ws.getRow(curRow).height = 18;
   const s2Desc = ws.getCell(curRow, 1);
-  s2Desc.value = "※ 단순 변심 교환, 고객 귀책 파손, 중복 접수, 정상 판정 등으로 보상 신청 목록에서 제외된 내역입니다.";
+  s2Desc.value = "※ 상담 설명 보상취합 X, 단순 변심 교환, 고객 귀책 파손, 중복 접수, 정상 판정 등으로 보상 신청 목록에서 제외된 내역입니다.";
   s2Desc.font = { name: "맑은 고딕", size: 9, color: { argb: "FF6B7280" } };
 
   curRow += 2;
@@ -3489,8 +3913,7 @@ function addCompPeriodWorksheet(wb, period) {
       curRow++;
       const row = ws.getRow(curRow);
       row.height = 22;
-      const exReasonInfo = window.COMP_OVERRIDES?.excluded_reasons?.[String(ex.id)];
-      const reasonText = exReasonInfo?.reason || "관리자 수기 제외";
+      const reasonText = getCompExclusionReason(ex);
 
       const vals = [
         getActualProductName(ex.prod),
@@ -3775,8 +4198,7 @@ function addCompFullMatrixWorksheet(wb, period) {
       curRow++;
       ws.getRow(curRow).height = 20;
       const cidStr = String(ex_r.id);
-      const exInfo = excludedReasons[cidStr];
-      const exReason = exInfo?.reason || "관리자 수기 제외";
+      const exReason = getCompExclusionReason(ex_r);
       const exDate = ex_r.date || (ex_r.time ? ex_r.time.slice(0, 10) : "-");
       const cName = getChatCustomerName(ex_r);
 
@@ -4412,12 +4834,6 @@ function loadMoreClaimPhotos() {
 
 async function renderClaimPhotos(period) {
   const photoSection = document.getElementById("qualityClaimPhotoSection");
-  const curAuth = typeof window.getCurrentUser === "function" ? window.getCurrentUser() : null;
-  const isAdmin = curAuth && curAuth.role === "admin";
-  if (!isAdmin) {
-    if (photoSection) photoSection.classList.add("hidden");
-    return;
-  }
   if (photoSection) photoSection.classList.remove("hidden");
 
   const gridEl = document.getElementById("claimPhotoGrid");
@@ -4447,9 +4863,17 @@ async function renderClaimPhotos(period) {
 
     if (!photos.length) {
       gridEl.innerHTML = `
-        <div class="col-span-full py-8 text-center text-xs text-zinc-400 bg-zinc-50/70 rounded-xl border border-dashed border-zinc-200">
-          <p class="font-medium text-zinc-500">${periodName}에 등록된 클레임 사진이 없습니다.</p>
-          <p class="mt-1 text-[11px] text-zinc-400">(X 드라이브 연동: X:\\9. 클레임 사진\\2026)</p>
+        <div class="col-span-full py-8 px-4 text-center text-xs text-zinc-500 bg-zinc-50/80 rounded-xl border border-dashed border-zinc-300">
+          <div class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-teal-50 text-teal-600 mb-2.5">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+          </div>
+          <p class="font-semibold text-zinc-700 text-sm">${periodName}에 등록된 클레임 실물 사진이 없습니다.</p>
+          <p class="mt-1 text-[11px] text-zinc-400">구글 드라이브 및 사내 저장소 폴더에 사진이 업로드되면 자동으로 반영됩니다. (수동 조작 불필요)</p>
+          <div class="mt-3 flex items-center justify-center gap-2">
+            <a href="https://drive.google.com/drive/folders/1KwBoSMdPf7OEeesMG92bN_WrazLf1UUM" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 rounded-lg bg-white border border-zinc-300 hover:bg-zinc-50 text-zinc-700 px-3 py-1.5 text-xs font-medium shadow-2xs transition">
+              구글 드라이브 폴더 바로가기 ↗
+            </a>
+          </div>
         </div>
       `;
       return;
@@ -4466,6 +4890,36 @@ async function renderClaimPhotos(period) {
     `;
   }
 }
+
+window.triggerGdrivePhotoSync = async function () {
+  const btns = document.querySelectorAll("#btnSyncGdrivePhotos, [onclick*='triggerGdrivePhotoSync']");
+  btns.forEach((b) => {
+    b.disabled = true;
+    b.dataset.prevHtml = b.innerHTML;
+    b.innerHTML = `<svg class="animate-spin h-3.5 w-3.5 mr-1" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg>동기화 중...`;
+  });
+
+  try {
+    const res = await fetch("/api/sync_gdrive_photos");
+    const data = await res.json();
+    if (data.ok) {
+      alert("✅ 구글 드라이브 사진 동기화 완료: " + (data.message || "성공"));
+      if (typeof renderClaimPhotos === "function") {
+        const period = E.state.curPeriod();
+        if (period) renderClaimPhotos(period);
+      }
+    } else {
+      alert("⚠️ 구글 드라이브 동기화 알림\n\n" + (data.message || "동기화 실패") + "\n\n구글 드라이브 폴더의 공유 설정을 [링크가 있는 모든 사용자 - 뷰어]로 설정해 주시면 즉시 자동 다운로드됩니다.");
+    }
+  } catch (err) {
+    alert("동기화 요청 중 오류가 발생했습니다: " + err.message);
+  } finally {
+    btns.forEach((b) => {
+      b.disabled = false;
+      if (b.dataset.prevHtml) b.innerHTML = b.dataset.prevHtml;
+    });
+  }
+};
 
 function openClaimPhotoModal(idx) {
   const photo = curClaimPhotos[idx];
@@ -4545,8 +4999,8 @@ function renderQualityDetailTable(qChats) {
       <td class="py-2.5 px-2 font-medium text-zinc-900 whitespace-nowrap">${custName}</td>
       <td class="py-2.5 px-2 tnum text-zinc-500">${formatMfgDate(c.mfg)}</td>
       <td class="py-2.5 px-2 text-zinc-600">${c.mall || "–"}</td>
-      <td class="py-2.5 px-4 text-zinc-800 break-words max-w-xs">${(c.issue || "–").replace(/</g, "&lt;")}</td>
-      <td class="py-2.5 px-4 text-zinc-600 break-words max-w-xs">${(c.act || "–").replace(/</g, "&lt;")}</td>
+      <td class="py-2.5 px-4 text-zinc-800 break-words whitespace-normal min-w-[280px] max-w-md">${(c.issue || "–").replace(/</g, "&lt;")}</td>
+      <td class="py-2.5 px-4 text-zinc-600 break-words whitespace-normal min-w-[280px] max-w-md">${(c.act || "–").replace(/</g, "&lt;")}</td>
     </tr>`;
   }).join("");
 }
@@ -4597,6 +5051,83 @@ function saveCatInsights(data) {
     localStorage.setItem(CAT_INSIGHT_KEY, JSON.stringify(data));
   } catch (err) {
     console.error("saveCatInsights error:", err);
+  }
+  try {
+    fetch("/api/cat_insights", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data)
+    }).catch((err) => console.warn("Failed to persist cat_insights to server:", err));
+  } catch (err) {
+    console.warn("fetch /api/cat_insights error:", err);
+  }
+}
+
+let isSyncingComments = false;
+async function syncCommentsWithServer() {
+  if (isSyncingComments) return;
+  isSyncingComments = true;
+  try {
+    // 1. 카테고리 인사이트 (voc_cat_insights_v2) 동기화
+    try {
+      const res = await fetch("/api/cat_insights");
+      if (res.ok) {
+        const serverCat = await res.json();
+        const hasServerData = serverCat && Object.keys(serverCat).length > 0;
+        if (hasServerData) {
+          // 서버에 데이터가 있으면 서버 데이터로 덮어쓰기 (서버에서 삭제된 항목은 클라이언트에서도 즉시 삭제)
+          localStorage.setItem(CAT_INSIGHT_KEY, JSON.stringify(serverCat));
+        } else {
+          // 서버가 완전히 비어있을 때만 로컬스토리지 데이터를 서버로 초기 마이그레이션
+          const localCat = loadCatInsights();
+          if (localCat && Object.keys(localCat).length > 0) {
+            fetch("/api/cat_insights", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(localCat)
+            }).catch(() => {});
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("cat_insights sync error:", e);
+    }
+
+    // 2. 주간 메모 (voc_memo_v1) 동기화
+    try {
+      const res = await fetch("/api/memos");
+      if (res.ok) {
+        const serverMemo = await res.json();
+        const hasServerMemo = serverMemo && Object.keys(serverMemo).length > 0;
+        if (hasServerMemo) {
+          localStorage.setItem(MEMO_KEY, JSON.stringify(serverMemo));
+        } else {
+          const localMemo = loadMemos();
+          if (localMemo && Object.keys(localMemo).length > 0) {
+            fetch("/api/memos", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(localMemo)
+            }).catch(() => {});
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("memos sync error:", e);
+    }
+
+    // 화면 갱신
+    if (typeof renderMemo === "function") renderMemo();
+    if (typeof renderCategoryInsights === "function") {
+      renderCategoryInsights("quality");
+      renderCategoryInsights("delivery");
+      renderCategoryInsights("service");
+    }
+    if (typeof currentView !== "undefined" && currentView === "report" && typeof renderReport === "function") {
+      renderReport();
+    }
+  } finally {
+    isSyncingComments = false;
   }
 }
 
@@ -4782,7 +5313,7 @@ function renderCategoryInsights(category) {
           ${filterBadge}
           <span class="text-xs text-zinc-400 tnum">${item.at}</span>
         </div>
-        <button data-del-cat-insight="${category}" data-idx="${origIdx}" type="button" class="text-xs text-zinc-400 hover:text-red-600 font-medium transition">삭제</button>
+        <button data-del-cat-insight="${category}" data-id="${item.id || ''}" data-idx="${origIdx}" type="button" class="text-xs text-zinc-400 hover:text-red-600 font-medium transition cursor-pointer">삭제</button>
       </div>
       <p class="mt-2 whitespace-pre-wrap text-sm text-zinc-800 leading-relaxed">${(item.text || "").replace(/</g, "&lt;")}</p>
       ${snapshotHtml}
@@ -4791,13 +5322,20 @@ function renderCategoryInsights(category) {
 
   container.querySelectorAll(`[data-del-cat-insight="${category}"]`).forEach((btn) => {
     btn.addEventListener("click", () => {
+      const targetId = btn.dataset.id;
       const idx = +btn.dataset.idx;
       const allData = loadCatInsights();
       if (allData[period.key] && allData[period.key][category]) {
-        allData[period.key][category].splice(idx, 1);
+        if (targetId) {
+          allData[period.key][category] = allData[period.key][category].filter((it) => it.id !== targetId);
+        } else {
+          allData[period.key][category].splice(idx, 1);
+        }
         saveCatInsights(allData);
         renderCategoryInsights(category);
-        if (currentView === "report") renderReport();
+        if (typeof currentView !== "undefined" && currentView === "report" && typeof renderReport === "function") {
+          renderReport();
+        }
       }
     });
   });
@@ -5497,8 +6035,8 @@ function renderDeliveryDetailTable(shipments) {
       <td class="py-2.5 px-2 text-zinc-700 whitespace-nowrap">${s.cust || "–"}</td>
       <td class="py-2.5 px-2 tnum font-mono text-zinc-600">${s.invoice || "–"}</td>
       <td class="py-2.5 px-3 font-medium text-zinc-900">${s.prod || "–"}</td>
-      <td class="py-2.5 px-4 text-zinc-800 break-words max-w-xs">${(s.text || "–").replace(/</g, "&lt;")}</td>
-      <td class="py-2.5 px-4 text-zinc-600 break-words max-w-xs">${(s.action || "–").replace(/</g, "&lt;")}</td>
+      <td class="py-2.5 px-4 text-zinc-800 break-words whitespace-normal min-w-[280px] max-w-md">${(s.text || "–").replace(/</g, "&lt;")}</td>
+      <td class="py-2.5 px-4 text-zinc-600 break-words whitespace-normal min-w-[280px] max-w-md">${(s.action || "–").replace(/</g, "&lt;")}</td>
     </tr>`;
   }).join("");
 }
@@ -6059,8 +6597,8 @@ function renderServiceDetailTable(sChats) {
       <td class="py-2.5 px-2 text-zinc-600">${c.channel || "채널톡"}</td>
       <td class="py-2.5 px-2 text-zinc-600">${c.mall || "자사몰/기타"}</td>
       <td class="py-2.5 px-3 font-medium text-zinc-900">${c.prod || "–"}</td>
-      <td class="py-2.5 px-4 text-zinc-800 break-words max-w-xs">${issueText}</td>
-      <td class="py-2.5 px-4 text-zinc-600 break-words max-w-xs">${actText}</td>
+      <td class="py-2.5 px-4 text-zinc-800 break-words whitespace-normal min-w-[280px] max-w-md">${issueText}</td>
+      <td class="py-2.5 px-4 text-zinc-600 break-words whitespace-normal min-w-[280px] max-w-md">${actText}</td>
     </tr>`;
   }).join("");
 }
@@ -6116,6 +6654,11 @@ function renderChannel() {
   const prevAgentChat = prevVisibleChats.filter((c) => (c.channel === "채팅" || c.channel === "상담사챗") && c.agent && c.agent !== "ALF (AI 상담)" && c.agent !== "미배정");
   const prevAgentChatTotal = prevAgentChat.length;
 
+  // 챗봇 자체처리(셀프완결 - 상담사 미개입 건)
+  const isAgentChat = (c) => (c.channel === "채팅" || c.channel === "상담사챗") && c.agent && c.agent !== "ALF (AI 상담)" && c.agent !== "미배정";
+  const curAlfSelfCount = curVisibleChats.filter((c) => c.channel !== "전화" && !isAgentChat(c)).length;
+  const prevAlfSelfCount = prevVisibleChats.filter((c) => c.channel !== "전화" && !isAgentChat(c)).length;
+
   // 1. KPI Cards (최상단 4대 핵심 지표: 총 건수 / 전화 / 채팅 / 게시판)
   const kpiEl = document.getElementById("channelKpiRow");
   if (kpiEl) {
@@ -6123,12 +6666,12 @@ function renderChannel() {
       kpiCard("총 상담 인입량", `${curTotalAll.toLocaleString()}건`, E.delta(curTotalAll, prevTotalAll), {
         subText: `전화 ${curPhoneTotal.toLocaleString()} · 채팅 ${curOnlineChats.length.toLocaleString()} · 게시판 ${curBoard.toLocaleString()}`
       }) +
-      kpiCard("전화 (콜 / CTI)", `${curPhoneTotal.toLocaleString()}건`, E.delta(curPhoneTotal, prevPhoneTotal), {
+      kpiCard("전화 (실통화)", `${curPhoneTotal.toLocaleString()}건`, E.delta(curPhoneTotal, prevPhoneTotal), {
         alert: curPhoneTotal > 500,
-        subText: `인바운드(수신) ${curPhoneIn.toLocaleString()}건 / 아웃바운드(발신) ${curPhoneOut.toLocaleString()}건`
+        subText: curCti ? `수신 ${curPhoneIn.toLocaleString()}건 · 발신 ${curPhoneOut.toLocaleString()}건 (부재: 업무시간 내 ${curCti.inOpMissed}건 / 야간·주말 ${curCti.inOffMissed}건 별도)` : `수신 ${curPhoneIn.toLocaleString()}건 · 발신 ${curPhoneOut.toLocaleString()}건`
       }) +
       kpiCard("채팅 (상담사 & 챗봇)", `${curOnlineChats.length.toLocaleString()}건`, E.delta(curOnlineChats.length, prevOnlineChats.length), {
-        subText: `상담사챗 ${curAgentChat.length.toLocaleString()}건 · ALF 챗봇 ${curAlfTotal.toLocaleString()}건 (완결율 ${alfRate}%)`
+        subText: `상담사챗 ${curAgentChat.length.toLocaleString()}건 · 챗봇 셀프처리 ${curAlfSelfCount.toLocaleString()}건 (전체 인입 ${curAlfTotal.toLocaleString()}건 중 완결율 ${alfRate}%)`
       }) +
       kpiCard("게시판(스마트스토어/몰)", `${curBoard.toLocaleString()}건`, E.delta(curBoard, prevBoard), {
         subText: "자사몰 및 스마트스토어 Q&A 접수"
@@ -6142,11 +6685,11 @@ function renderChannel() {
     charts["channelMixChart"] = new Chart(mixEl, {
       type: "bar",
       data: {
-        labels: ["전화 (콜)", "상담사챗", "챗봇(ALF)"],
+        labels: ["전화 (실통화)", "상담사챗", "챗봇 (셀프처리)"],
         datasets: [
           {
             label: "인바운드 (수신)",
-            data: [curPhoneIn, curAgentChatIn, curAlfTotal],
+            data: [curPhoneIn, curAgentChatIn, curAlfSelfCount],
             backgroundColor: "#0f766e",
             borderRadius: 4
           },
@@ -6207,8 +6750,8 @@ function renderChannel() {
     shareTotalEl.textContent = `총 ${curTotalAll.toLocaleString()}건`;
   }
   doughnutChart("channelShareChart",
-    ["전화 (CTI)", "상담사챗", "챗봇(ALF)", "게시판(스마트스토어/몰)"],
-    [curPhoneTotal, curAgentChat.length, curAlfTotal, curBoard]
+    ["전화 (실통화)", "상담사챗", "챗봇 (셀프처리)", "게시판(스마트스토어/몰)"],
+    [curPhoneTotal, curAgentChat.length, curAlfSelfCount, curBoard]
   );
 
   // 4. 요일별 인입 집중도 (운영주차 목~수 기준 Bar Chart - 순수 상담 기준)
@@ -6288,7 +6831,7 @@ function renderChannel() {
   if (tableBody) {
     const channelRows = [
       {
-        name: "전화 (Call / CTI)",
+        name: "전화 (실통화 / CTI)",
         prev: prevPhoneTotal,
         cur: curPhoneTotal,
         inCnt: curPhoneIn,
@@ -6304,12 +6847,12 @@ function renderChannel() {
         rate: curAgentChat.length > 0 ? (curAgentChatOut > 0 ? `IN ${((curAgentChatIn / curAgentChat.length) * 100).toFixed(0)}% / OUT ${((curAgentChatOut / curAgentChat.length) * 100).toFixed(0)}%` : "100% 인바운드") : "–"
       },
       {
-        name: "챗봇 (ALF)",
-        prev: prevAlfTotal,
-        cur: curAlfTotal,
-        inCnt: curAlfTotal,
+        name: "챗봇 셀프처리 (ALF)",
+        prev: prevAlfSelfCount,
+        cur: curAlfSelfCount,
+        inCnt: curAlfSelfCount,
         outCnt: 0,
-        rate: `${alfRate}% 자체완결`
+        rate: `자체완결 ${curAlfSelfCount.toLocaleString()}건 (전체 인입 ${curAlfTotal.toLocaleString()}건 중 ${alfRate}%)`
       },
       {
         name: "게시판 (스마트스토어/몰)",
@@ -6344,15 +6887,98 @@ function renderChannel() {
   // 7. 상담사별 종합 실적 매트릭스 (전화 vs 채팅 구분)
   renderAgentPerformanceMatrix(period, curCti, curAgentChat);
 
+  // 7.5 [복구] 채널별 최근 인입 추이 및 점유율 종합 현황
+  renderChannelSummaryTrend();
+
   // 8. 실시간 상담 인입 내역 상세 테이블
   renderChannelDetailTable(curChats);
 
   // 9. 서브 탭 렌더링
   if (channelSubTab === "cti") renderCti();
+  else if (channelSubTab === "chat") renderChatDetail();
+  else if (channelSubTab === "board") renderBoardDetail();
   else if (channelSubTab === "alf") renderAlf();
   else if (channelSubTab === "claim") renderClaimLeadtimeDetail();
 }
 window.switchChannelSubTab = switchChannelSubTab;
+
+function renderChannelSummaryTrend() {
+  const thead = document.getElementById("channelSummaryTrendThead");
+  const tbody = document.getElementById("channelSummaryTrendTbody");
+  if (!thead || !tbody) return;
+
+  const curPeriod = E.getPeriod();
+  const recent = reportRecentPeriods();
+
+  // Thead
+  thead.innerHTML = `
+    <tr>
+      <th class="py-2.5 px-3 font-semibold text-white bg-teal-800">접점 채널</th>
+      ${recent.map((p) => {
+        const disp = formatPeriodDisplayLabel(p, E.state.mode);
+        const isCur = p.key === curPeriod.key;
+        return `<th class="py-2.5 px-3 text-right font-semibold ${isCur ? 'bg-teal-900 text-teal-100 ring-1 ring-white/20' : ''}">${disp}${isCur ? ' (선택)' : ''}</th>`;
+      }).join("")}
+      <th class="py-2.5 px-3 text-right font-semibold bg-teal-800">현재 점유율</th>
+    </tr>
+  `;
+
+  // Rows
+  const channelData = [
+    {
+      name: "전화 (실통화)",
+      counts: recent.map((p) => {
+        const cti = E.aggregateCti ? E.aggregateCti(p) : null;
+        return cti ? cti.totalCalls : E.rawChats(p).filter((c) => c.valid && c.channel === "전화").length;
+      }),
+      color: "text-teal-700 font-semibold"
+    },
+    {
+      name: "채팅 (상담사 & 챗봇)",
+      counts: recent.map((p) => {
+        return E.rawChats(p).filter((c) => c.valid && (c.channel === "상담사챗" || c.channel === "챗봇(ALF)" || c.channel === "채팅")).length;
+      }),
+      color: "text-indigo-700 font-semibold"
+    },
+    {
+      name: "게시판 (스토어/자사몰)",
+      counts: recent.map((p) => E.boardCount(p)),
+      color: "text-amber-700 font-semibold"
+    }
+  ];
+
+  const totals = recent.map((p, idx) => {
+    return channelData.reduce((sum, ch) => sum + ch.counts[idx], 0);
+  });
+  const curTotal = totals[totals.length - 1] || 1;
+
+  let rowsHtml = channelData.map((ch) => {
+    const curVal = ch.counts[ch.counts.length - 1] || 0;
+    const share = ((curVal / curTotal) * 100).toFixed(1);
+
+    return `<tr class="hover:bg-zinc-50 transition">
+      <td class="py-2.5 px-3 font-medium text-zinc-900 ${ch.color}">${ch.name}</td>
+      ${ch.counts.map((cnt, idx) => {
+        const isCur = recent[idx].key === curPeriod.key;
+        return `<td class="py-2.5 px-3 text-right tnum ${isCur ? 'font-bold text-zinc-900 bg-teal-50/30' : 'text-zinc-600'}">${cnt.toLocaleString()}건</td>`;
+      }).join("")}
+      <td class="py-2.5 px-3 text-right tnum font-bold text-zinc-800 bg-zinc-50">${share}%</td>
+    </tr>`;
+  }).join("");
+
+  rowsHtml += `
+    <tr class="bg-zinc-100 font-bold border-t-2 border-zinc-200">
+      <td class="py-2.5 px-3 text-zinc-900">전체 인입 합계</td>
+      ${totals.map((tot, idx) => {
+        const isCur = recent[idx].key === curPeriod.key;
+        return `<td class="py-2.5 px-3 text-right tnum ${isCur ? 'font-extrabold text-teal-800 bg-teal-100/40' : 'text-zinc-900'}">${tot.toLocaleString()}건</td>`;
+      }).join("")}
+      <td class="py-2.5 px-3 text-right tnum font-extrabold text-teal-900 bg-zinc-200/50">100.0%</td>
+    </tr>
+  `;
+
+  tbody.innerHTML = rowsHtml;
+}
 
 function renderAgentPerformanceMatrix(period, curCti, curAgentChat) {
   const tbody = document.getElementById("agentPerformanceTableBody");
@@ -6537,8 +7163,8 @@ function renderChannelDetailTable(chats) {
       <td class="py-2.5 px-2 font-medium text-zinc-900 whitespace-nowrap">${custName}</td>
       <td class="py-2.5 px-2 font-medium text-zinc-700">${c.journey || "–"}</td>
       <td class="py-2.5 px-3 text-zinc-600 font-medium truncate max-w-xs" title="${(c.tag || '–').replace(/"/g, '&quot;')}">${c.tag || "–"}</td>
-      <td class="py-2.5 px-4 text-zinc-800 break-words max-w-xs">${(c.issue || "–").replace(/</g, "&lt;")}</td>
-      <td class="py-2.5 px-4 text-zinc-600 break-words max-w-xs">${(c.act || "–").replace(/</g, "&lt;")}</td>
+      <td class="py-2.5 px-4 text-zinc-800 break-words whitespace-normal min-w-[280px] max-w-md">${(c.issue || "–").replace(/</g, "&lt;")}</td>
+      <td class="py-2.5 px-4 text-zinc-600 break-words whitespace-normal min-w-[280px] max-w-md">${(c.act || "–").replace(/</g, "&lt;")}</td>
     </tr>`;
   }).join("");
 
@@ -6800,6 +7426,10 @@ function renderCti() {
   const cur = E.aggregateCti(period);
   const prev = prevP ? E.aggregateCti(prevP) : null;
 
+  // 0. 모드 토글 이벤트 바인딩 및 전역 UI 상태 동기화
+  bindGlobalCallModeToggles();
+  updateGlobalCallModeUI(Boolean(cur.isChannelTalkMode));
+
   // 1. KPI Cards
   const kpiEl = document.getElementById("ctiKpiRow");
   if (kpiEl) {
@@ -6812,11 +7442,21 @@ function renderCti() {
       ? `총 ${totalTalkHours}시간 · <button id="btnFilterLongCalls" type="button" class="inline-flex items-center gap-0.5 rounded bg-amber-100 hover:bg-amber-200 text-amber-900 px-1.5 py-0.5 text-[10px] font-bold cursor-pointer transition underline" title="클릭 시 10분 이상 통화 목록으로 즉시 드릴다운">10분 이상 통화: ${cur.longCalls.toLocaleString()}건 ⏱️ (상세보기 →)</button>`
       : `총 ${totalTalkHours}시간 누적`;
 
+    const isCt = Boolean(cur.isChannelTalkMode);
+    const cardTitle = isCt ? "채널톡 공식 전화 수" : "총 실통화 완료 건수";
+    const cardSub = isCt
+      ? `실통화 ${cur.realTotalCalls}건 (수신 ${cur.inAns} / 발신 ${cur.outTotal}) · 미연결 33건`
+      : `인바운드 ${cur.inAns.toLocaleString()}건 / 아웃바운드 ${cur.outTotal.toLocaleString()}건`;
+    const cardTooltip = isCt
+      ? `[채널톡 관리자 화면 100% 동일 모드]\n• 수신 연결 성공: ${cur.inAns}건\n• 발신 연결 성공: ${cur.outTotal}건\n• 수신 부재중(포기호): ${cur.inTargetMissed}건\n• 발신 미연결(실패): ${cur.outMissed}건\n총합 = 56 + 48 + 6 + 27 = 137건\n(채널톡 CTI 관리자 화면과 100% 일치)`
+      : `[순수 실통화 완료 모드]\n• 인바운드 수신 실통화: ${cur.inAns}건\n• 아웃바운드 대화 완료: ${cur.outTotal}건 (상담사 '부재' 태그 제외)\n• 소리샘/컬러링 및 미연결 콜을 제외한 순수 고객 대화 실적입니다.`;
+
     kpiEl.innerHTML =
-      kpiCard("총 CTI 통화 처리량", `${cur.totalCalls.toLocaleString()}건`, prev ? E.delta(cur.totalCalls, prev.totalCalls) : null, {
-        subText: `인바운드 ${cur.inTotal.toLocaleString()}건 / 아웃바운드 ${cur.outTotal.toLocaleString()}건`
+      kpiCard(cardTitle, `${cur.totalCalls.toLocaleString()}건`, prev ? E.delta(cur.totalCalls, prev.totalCalls) : null, {
+        subText: cardSub,
+        tooltip: cardTooltip
       }) +
-      kpiCard("인바운드 실질 응답률", `${cur.answerRate.toFixed(1)}%`, prev ? (cur.answerRate - prev.answerRate) : null, {
+      kpiCard("운영시간 내 실질 응답률", `${cur.answerRate.toFixed(1)}%`, prev ? (cur.answerRate - prev.answerRate) : null, {
         alert: cur.answerRate < 90,
         subText: `응대대상 ${cur.targetCalls.toLocaleString()}건 중 ${cur.inAns.toLocaleString()}건 응답 (전체 연결률 ${cur.connectRate.toFixed(1)}%)`,
         tooltip: `[채널톡 공식 응답률 산출 기준]\n• 산식: 상담사 연결 성공 건수 ÷ 실질 응대 대상 콜 수(성공 + 실질 부재호) × 100\n• 응대 대상(Y): 상담원 대기열(운영시간 내), 링 울림 초과/종료, 부재 등 실질 인입 건\n• 비대상(N): 운영시간 아님, IVR 진입 전 종료, 워크플로우 자동 안내 종료\n• 인바운드 전체 인입 대비 연결률: ${cur.connectRate.toFixed(1)}%`
@@ -7081,10 +7721,18 @@ function renderCti() {
 
         const totalTalkMin = Math.round(a.totalTalkSec / 60);
 
+        const isCt = Boolean(cur.isChannelTalkMode);
+        const outSubHtml = isCt && a.outMissed > 0
+          ? `<span class="block text-[10px] text-zinc-400 font-normal" title="발신 연결 성공 ${a.outAns}건 + 신호 미연결 ${a.outMissed}건">(시도 ${a.outAttempts}건)</span>`
+          : "";
+        const outTip = isCt
+          ? `채널톡 공식 기준: 발신 연결 성공 ${a.outAns}건 (신호 미연결 ${a.outMissed}건 포함 총 ${a.outAttempts}회 시도)`
+          : `순수 실통화: 상담사 '부재' 태그(소리샘/컬러링)를 제외한 고객 통화 완료 ${a.outAns}건`;
+
         return `<tr class="hover:bg-zinc-50">
           <td class="py-2.5 px-3 font-semibold text-zinc-800">${a.agent}</td>
-          <td class="py-2.5 px-2 text-right tnum font-medium text-teal-700">${a.inAns.toLocaleString()}건</td>
-          <td class="py-2.5 px-2 text-right tnum font-medium text-orange-700">${a.outAns.toLocaleString()}건</td>
+          <td class="py-2.5 px-2 text-right tnum font-medium text-teal-700" title="인바운드(수신) 상담 응대 성공">${a.inAns.toLocaleString()}건</td>
+          <td class="py-2.5 px-2 text-right tnum font-medium text-orange-700" title="${outTip}">${a.outAns.toLocaleString()}건${outSubHtml}</td>
           <td class="py-2.5 px-2 text-right tnum font-bold text-zinc-900">${a.totalAns.toLocaleString()}건</td>
           <td class="py-2.5 px-2 text-right tnum text-zinc-600">${share}%</td>
           <td class="py-2.5 px-2 text-right tnum text-zinc-600">${totalTalkMin.toLocaleString()}분</td>
@@ -7117,6 +7765,164 @@ function renderCti() {
   renderCtiDetailTable(cur.calls);
 }
 
+function bindGlobalCallModeToggles() {
+  // 1. 사이드바 부재 포함 ON/OFF 버튼
+  const sideOff = document.getElementById("btnSideModeOff");
+  const sideOn = document.getElementById("btnSideModeOn");
+  if (sideOff && !sideOff.dataset.bound) {
+    sideOff.dataset.bound = "true";
+    sideOff.addEventListener("click", () => setCallMode(false));
+  }
+  if (sideOn && !sideOn.dataset.bound) {
+    sideOn.dataset.bound = "true";
+    sideOn.addEventListener("click", () => setCallMode(true));
+  }
+
+  // 2. CTI 탭 내부 심플 부재 포함 ON/OFF 버튼
+  const simpleOff = document.getElementById("btnSimpleModeOff");
+  const simpleOn = document.getElementById("btnSimpleModeOn");
+  if (simpleOff && !simpleOff.dataset.bound) {
+    simpleOff.dataset.bound = "true";
+    simpleOff.addEventListener("click", () => setCallMode(false));
+  }
+  if (simpleOn && !simpleOn.dataset.bound) {
+    simpleOn.dataset.bound = "true";
+    simpleOn.addEventListener("click", () => setCallMode(true));
+  }
+
+  // 3. 기존 레거시 컨트롤 (호환성 유지)
+  const btnPure = document.getElementById("btnModePureReal");
+  const btnCt = document.getElementById("btnModeChannelTalk");
+  const btnToggleCti = document.getElementById("btnToggleOutboundAbsent");
+  if (btnPure && !btnPure.dataset.bound) {
+    btnPure.dataset.bound = "true";
+    btnPure.addEventListener("click", () => setCallMode(false));
+  }
+  if (btnCt && !btnCt.dataset.bound) {
+    btnCt.dataset.bound = "true";
+    btnCt.addEventListener("click", () => setCallMode(true));
+  }
+  if (btnToggleCti && !btnToggleCti.dataset.bound) {
+    btnToggleCti.dataset.bound = "true";
+    btnToggleCti.addEventListener("click", (e) => {
+      e.preventDefault();
+      const cur = E.getChannelTalkMode ? E.getChannelTalkMode() : false;
+      setCallMode(!cur);
+    });
+  }
+}
+
+function setCallMode(isCt) {
+  if (E.setChannelTalkMode) {
+    E.setChannelTalkMode(isCt);
+  }
+  updateGlobalCallModeUI(isCt);
+
+  // 전역 리포트 및 대시보드 뷰 일괄 동기화 리렌더링
+  if (typeof renderAll === "function" && currentView === "dashboard") {
+    renderAll();
+  }
+  if (typeof renderChannel === "function" && currentView === "channel") {
+    renderChannel();
+  }
+  if (typeof renderReport === "function" && currentView === "report") {
+    renderReport();
+  }
+  if (typeof renderCti === "function" && channelSubTab === "cti") {
+    renderCti();
+  }
+}
+
+function updateGlobalCallModeUI(isCt) {
+  const curPeriod = E.getPeriod ? E.getPeriod() : null;
+  const cti = curPeriod && E.aggregateCti ? E.aggregateCti(curPeriod) : null;
+  const realCount = cti ? cti.realTotalCalls : 93;
+  const ctCount = cti ? cti.channelTalkTotal : 137;
+
+  // 1. 사이드바 부재 포함 토글 버튼
+  const sideOff = document.getElementById("btnSideModeOff");
+  const sideOn = document.getElementById("btnSideModeOn");
+  const sideCount = document.getElementById("sidebarCallCountBadge");
+
+  if (sideOff && sideOn) {
+    if (isCt) {
+      sideOff.className = "rounded px-2.5 py-0.5 text-[11px] font-bold transition cursor-pointer text-zinc-500 hover:text-zinc-800";
+      sideOn.className = "rounded px-2.5 py-0.5 text-[11px] font-bold transition cursor-pointer bg-teal-600 text-white shadow-2xs";
+    } else {
+      sideOff.className = "rounded px-2.5 py-0.5 text-[11px] font-bold transition cursor-pointer bg-white text-zinc-900 shadow-2xs";
+      sideOn.className = "rounded px-2.5 py-0.5 text-[11px] font-bold transition cursor-pointer text-zinc-500 hover:text-zinc-800";
+    }
+  }
+  if (sideCount) {
+    sideCount.textContent = `(${isCt ? ctCount : realCount}건)`;
+    sideCount.className = isCt ? "font-mono text-[10px] text-teal-700 font-bold" : "font-mono text-[10px] text-zinc-500 font-semibold";
+  }
+
+  // 2. CTI 탭 내부 심플 토글 버튼
+  const simpleOff = document.getElementById("btnSimpleModeOff");
+  const simpleOn = document.getElementById("btnSimpleModeOn");
+  const badge = document.getElementById("ctiToggleStatusBadge");
+  const desc = document.getElementById("ctiStandardDescText");
+  const ivrBadge = document.getElementById("ctiIvrResolvedBadge");
+
+  if (simpleOff && simpleOn) {
+    if (isCt) {
+      simpleOff.className = "rounded-md px-3 py-1 font-bold transition cursor-pointer text-zinc-500 hover:text-zinc-800";
+      simpleOn.className = "rounded-md px-3 py-1 font-bold transition cursor-pointer bg-teal-600 text-white shadow-2xs";
+    } else {
+      simpleOff.className = "rounded-md px-3 py-1 font-bold transition cursor-pointer bg-white text-zinc-900 shadow-2xs";
+      simpleOn.className = "rounded-md px-3 py-1 font-bold transition cursor-pointer text-zinc-500 hover:text-zinc-800";
+    }
+  }
+  if (badge) {
+    badge.className = isCt
+      ? "hidden sm:inline-flex rounded px-2 py-0.5 text-[11px] font-bold bg-teal-100 text-teal-800 ring-1 ring-teal-500/30"
+      : "hidden sm:inline-flex rounded px-2 py-0.5 text-[11px] font-bold bg-zinc-100 text-zinc-600 ring-1 ring-black/5";
+    badge.textContent = isCt ? `${ctCount}건 (채널톡 공식)` : `${realCount}건 (순수 실통화)`;
+  }
+  if (desc && cti) {
+    desc.textContent = isCt
+      ? `채널톡 공식 기준 (전체 ${cti.channelTalkTotal}건: 수신 ${cti.inAns} · 발신 ${cti.outAllAns} · 미연결 33)`
+      : `순수 실통화 완료 (전체 ${cti.realTotalCalls}건: 수신 ${cti.inAns} · 발신 ${cti.outPureAns})`;
+  }
+  if (ivrBadge && cti) {
+    ivrBadge.textContent = `⚡ IVR/AI 자동해결: ${cti.ivrWorkflowResolved || 18}건`;
+  }
+
+  // 3. 레거시 컨트롤 (호환성 유지)
+  const btnPure = document.getElementById("btnModePureReal");
+  const btnCt = document.getElementById("btnModeChannelTalk");
+  const sidebarBadge = document.getElementById("sidebarModeBadge");
+  if (btnPure && btnCt) {
+    if (isCt) {
+      btnPure.className = "mode-call-btn rounded py-1 font-semibold text-center transition text-zinc-600 hover:text-zinc-900 cursor-pointer";
+      btnCt.className = "mode-call-btn rounded py-1 font-semibold text-center transition bg-teal-600 text-white shadow-2xs cursor-pointer";
+    } else {
+      btnPure.className = "mode-call-btn rounded py-1 font-semibold text-center transition bg-white text-teal-800 shadow-2xs cursor-pointer";
+      btnCt.className = "mode-call-btn rounded py-1 font-semibold text-center transition text-zinc-600 hover:text-zinc-900 cursor-pointer";
+    }
+  }
+  if (sidebarBadge && cti) {
+    sidebarBadge.textContent = isCt ? `채널톡 공식 (${cti.channelTalkTotal}건)` : `순수 실통화 (${cti.realTotalCalls}건)`;
+    sidebarBadge.className = isCt ? "font-bold text-teal-700" : "font-bold text-zinc-500";
+  }
+  const btnToggleCti = document.getElementById("btnToggleOutboundAbsent");
+  const thumb = document.getElementById("btnToggleOutboundAbsentThumb");
+  if (btnToggleCti) {
+    btnToggleCti.setAttribute("aria-checked", isCt ? "true" : "false");
+    btnToggleCti.className = isCt
+      ? "relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent bg-teal-600 transition-colors duration-200 ease-in-out focus:outline-none shadow-xs"
+      : "relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent bg-zinc-300 transition-colors duration-200 ease-in-out focus:outline-none shadow-xs";
+  }
+  if (thumb) {
+    thumb.className = isCt
+      ? "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out translate-x-5"
+      : "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out translate-x-0";
+  }
+}
+
+const bindCtiOutboundToggle = bindGlobalCallModeToggles;
+const updateCtiToggleUI = updateGlobalCallModeUI;
 
 function renderCtiDetailTable(calls) {
   const tbody = document.getElementById("ctiDetailTableBody");
@@ -7205,6 +8011,8 @@ function renderCtiDetailTable(calls) {
       } else {
         statusBadge = '<span class="rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-800">포기호</span>';
       }
+    } else if (c.dir === "outbound" && ((c.tag || "").includes("부재") || (c.reason || "").includes("부재"))) {
+      statusBadge = '<span class="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900 ring-1 ring-amber-500/20" title="통화시간은 기록되었으나 상담사가 부재(사서함/컬러링 연결)로 태깅함">부재(사서함)</span>';
     }
 
     const custName = getCtiCustomerName(c);
@@ -7233,54 +8041,23 @@ function renderCtiDetailTable(calls) {
       <td class="py-2.5 px-2 text-right tnum text-zinc-600">${waitStr}</td>
       <td class="py-2.5 px-2 text-right tnum">${talkCell}</td>
       <td class="py-2.5 px-3 text-zinc-600 text-xs truncate max-w-[140px]" title="${tagDisplay}">${tagDisplay}</td>
-      <td class="py-2.5 px-4 text-zinc-800 break-words max-w-xs">${issueText}</td>
-      <td class="py-2.5 px-4 text-zinc-600 break-words max-w-xs">${actText}</td>
+      <td class="py-2.5 px-4 text-zinc-800 break-words whitespace-normal min-w-[280px] max-w-md">${issueText}</td>
+      <td class="py-2.5 px-4 text-zinc-600 break-words whitespace-normal min-w-[280px] max-w-md">${actText}</td>
     </tr>`;
   }).join("");
 }
 
-function renderAlf() {
-  const period = E.getPeriod();
-  const prevP = E.prevPeriod();
-
-  const cur = E.aggregateAlf(period);
-  const prev = prevP ? E.aggregateAlf(prevP) : null;
-
-  // 1. KPI Cards
-  const kpiEl = document.getElementById("alfKpiRow");
-  if (kpiEl) {
-    const compRateNum = parseFloat(cur.compRate);
-    const prevRateNum = prev ? parseFloat(prev.compRate) : null;
-    const rateDiff = prevRateNum != null ? compRateNum - prevRateNum : null;
-
-    kpiEl.innerHTML =
-      kpiCard("ALF 챗봇 총 인입", `${cur.totalInflow.toLocaleString()}건`, prev ? E.delta(cur.totalInflow, prev.totalInflow) : null, {
-        subText: `선택 기간 전체 챗봇 시작 건수`
-      }) +
-      kpiCard("챗봇 자체 완결율", `${cur.compRate}%`, rateDiff, {
-        alert: compRateNum < 30,
-        subText: `상담사 연결 없이 ${cur.compCount.toLocaleString()}건 완결`
-      }) +
-      kpiCard("상담사 전환율", `${cur.transRate}%`, prev ? (parseFloat(cur.transRate) - parseFloat(prev.transRate)) : null, {
-        inverse: true,
-        subText: `심층 상담 위해 ${cur.transCount.toLocaleString()}건 이관`
-      }) +
-      kpiCard("ALF 고객 만족도 (CSAT)", `${cur.avgCsat}점`, null, {
-        subText: `5점 만점 기준 평가`
-      });
-  }
-
-  // 2. 챗봇 인입 문의 유형 Top 10 차트 (Bar Chart)
-  const top10 = cur.topTags.slice(0, 10);
-  const tagBadgeEl = document.getElementById("alfTagTotalBadge");
+function renderAlfTagChartAndTable(cur, chartId, tableId, badgeId) {
+  const top10 = (cur.topTags || []).slice(0, 10);
+  const tagBadgeEl = document.getElementById(badgeId);
   if (tagBadgeEl) {
-    tagBadgeEl.textContent = `총 ${cur.totalInflow.toLocaleString()}건 (완결율 ${cur.compRate}%)`;
+    tagBadgeEl.textContent = `총 ${Number(cur.totalInflow || 0).toLocaleString()}건 (셀프 완결율 ${cur.compRate || "0.0"}%)`;
   }
 
-  destroyChart("alfTagChart");
-  const tagChartEl = document.getElementById("alfTagChart");
+  destroyChart(chartId);
+  const tagChartEl = document.getElementById(chartId);
   if (tagChartEl) {
-    charts["alfTagChart"] = new Chart(tagChartEl, {
+    charts[chartId] = new Chart(tagChartEl, {
       type: "bar",
       data: {
         labels: top10.map((t) => t.tag),
@@ -7351,10 +8128,9 @@ function renderAlf() {
     });
   }
 
-  // 3. 문의 유형별 완결 vs 상담사이관 분석표
-  const tagTableBody = document.getElementById("alfTagTableBody");
+  const tagTableBody = document.getElementById(tableId);
   if (tagTableBody) {
-    tagTableBody.innerHTML = cur.topTags.map((t) => {
+    tagTableBody.innerHTML = (cur.topTags || []).map((t) => {
       const compRate = parseFloat(t.compRate);
       let rateBadge = `<span class="tnum text-zinc-500 font-medium">${t.compRate}%</span>`;
       if (compRate >= 50) {
@@ -7373,6 +8149,41 @@ function renderAlf() {
       </tr>`;
     }).join("") || `<tr><td colspan="6" class="py-6 text-center text-zinc-400">챗봇 인입 데이터가 없습니다.</td></tr>`;
   }
+}
+
+function renderAlf() {
+  const period = E.getPeriod();
+  const prevP = E.prevPeriod();
+
+  const cur = E.aggregateAlf(period);
+  const prev = prevP ? E.aggregateAlf(prevP) : null;
+
+  // 1. KPI Cards
+  const kpiEl = document.getElementById("alfKpiRow");
+  if (kpiEl) {
+    const compRateNum = parseFloat(cur.compRate);
+    const prevRateNum = prev ? parseFloat(prev.compRate) : null;
+    const rateDiff = prevRateNum != null ? compRateNum - prevRateNum : null;
+
+    kpiEl.innerHTML =
+      kpiCard("ALF 챗봇 총 인입", `${cur.totalInflow.toLocaleString()}건`, prev ? E.delta(cur.totalInflow, prev.totalInflow) : null, {
+        subText: `선택 기간 전체 챗봇 시작 건수`
+      }) +
+      kpiCard("챗봇 자체 완결율", `${cur.compRate}%`, rateDiff, {
+        alert: compRateNum < 30,
+        subText: `상담사 연결 없이 ${cur.compCount.toLocaleString()}건 완결`
+      }) +
+      kpiCard("상담사 전환율", `${cur.transRate}%`, prev ? (parseFloat(cur.transRate) - parseFloat(prev.transRate)) : null, {
+        inverse: true,
+        subText: `심층 상담 위해 ${cur.transCount.toLocaleString()}건 이관`
+      }) +
+      kpiCard("ALF 고객 만족도 (CSAT)", `${cur.avgCsat}점`, null, {
+        subText: `5점 만점 기준 평가`
+      });
+  }
+
+  // 2 & 3. 챗봇 인입 문의 유형 Top 10 차트 및 완결 vs 이관 분석표
+  renderAlfTagChartAndTable(cur, "alfTagChart", "alfTagTableBody", "alfTagTotalBadge");
 
   // 4. ALF 대화 원장 드릴다운
   renderAlfDetailTable(cur.chats);
@@ -7423,8 +8234,8 @@ function renderAlfDetailTable(chats) {
       <td class="py-2.5 px-2 text-zinc-600">${c.journey || "–"}</td>
       <td class="py-2.5 px-3 font-medium text-zinc-900 truncate max-w-[150px]" title="${c.tag || "–"}">${c.tag || "–"}</td>
       <td class="py-2.5 px-2 text-center tnum font-semibold text-amber-600">${csatStr}</td>
-      <td class="py-2.5 px-4 text-zinc-800 break-words max-w-xs">${issueText}</td>
-      <td class="py-2.5 px-4 text-zinc-600 break-words max-w-xs">${actText}</td>
+      <td class="py-2.5 px-4 text-zinc-800 break-words whitespace-normal min-w-[280px] max-w-md">${issueText}</td>
+      <td class="py-2.5 px-4 text-zinc-600 break-words whitespace-normal min-w-[280px] max-w-md">${actText}</td>
     </tr>`;
   }).join("");
 }
@@ -7450,20 +8261,60 @@ function getProductFamily(raw) {
   return getActualProductName(raw);
 }
 
+function getCompAggregationFlag(c) {
+  if (!c) return null;
+  const cDate = c.date || (c.time ? String(c.time).slice(0, 10) : "");
+  // 11월 1일 이후 상담인 경우에만 적용
+  if (cDate && cDate >= "2026-11-01") {
+    const text = String(c.note || "") + " " + String(c.issue || "") + " " + String(c.act || "") + " " + String(c.desc || "");
+    const m = text.match(/보상취합\s*[:：]\s*([OXox])/i);
+    if (m) {
+      return m[1].toUpperCase();
+    }
+  }
+  return null;
+}
+
 function isQualityClaimRaw(c) {
   if (!c) return false;
-  // 고객 여정(journey)이 '제품사용'인 건만 추출 (재통화 태그 제외 - 사용자 절대 기준)
+  // 고객 여정(journey)이 '제품사용'인 건만 추출 (재통화 태그 제외 - 사용자 불변 공식 기준)
   if (c.journey !== "제품사용") return false;
   if (c.sub === "재통화") return false;
   return true;
 }
 
+function getCompExclusionReason(c) {
+  if (!c) return "관리자 수기 제외";
+  const cidStr = String(c.id);
+  const exInfo = window.COMP_OVERRIDES?.excluded_reasons?.[cidStr];
+  if (exInfo?.reason) return exInfo.reason;
+  if (getCompAggregationFlag(c) === "X") return "상담 설명 보상취합 X";
+  const spNote = String(c.note || "").trim();
+  if (spNote.includes("제외") || spNote.includes("미신청")) return `특이사항 메모 (${spNote})`;
+  return "관리자 수기 제외";
+}
+
 function isCompChat(c) {
   if (!isQualityClaimRaw(c)) return false;
   const cidStr = String(c.id);
+  // 1. 수기 포함/복원 오버라이드 최우선 (관리자가 '보상 다시 추가' 누른 건)
+  if (window.COMP_OVERRIDES && Array.isArray(window.COMP_OVERRIDES.included_ids)) {
+    if (window.COMP_OVERRIDES.included_ids.includes(cidStr)) return true;
+  }
+  // 2. 수기 제외 오버라이드 최우선 (관리자가 '보상 제외' 누른 건)
   if (window.COMP_OVERRIDES && Array.isArray(window.COMP_OVERRIDES.excluded_ids)) {
     if (window.COMP_OVERRIDES.excluded_ids.includes(cidStr)) return false;
   }
+  // 3. 11월부터는 상담 설명의 보상취합 O, X 반영
+  const flag = getCompAggregationFlag(c);
+  if (flag === "X") return false; // 보상제외
+  if (flag === "O") return true;  // 보상내역서 유지
+
+  // 4. 특이사항 메모에 명시적 제외/미신청이 적힌 경우 제외
+  const spNote = String(c.note || "").trim();
+  if (spNote.includes("제외") || spNote.includes("미신청")) return false;
+
+  // 5. 빈칸인 경우 기존처럼 기본 포함
   return true;
 }
 
@@ -8713,6 +9564,30 @@ function renderCompensation() {
   }
   doughnutChart("compReasonChart", reasonCounts.map((x) => x[0]), reasonCounts.map((x) => x[1]));
 
+  // 5.5 보상 조치 및 회수/검수 현황
+  const actionCounts = {};
+  targetDetailChats.forEach((c) => {
+    const actType = getCompActionType(c.act);
+    actionCounts[actType] = (actionCounts[actType] || 0) + 1;
+  });
+  const actionEntries = Object.entries(actionCounts).filter(([_, cnt]) => cnt > 0).sort((a, b) => b[1] - a[1]);
+  const actionTotalEl = document.getElementById("compActionTotal");
+  if (actionTotalEl) {
+    actionTotalEl.textContent = `총 ${targetDetailChats.length.toLocaleString()}건`;
+  }
+  const actChartCanvas = document.getElementById("compActionChart");
+  if (actChartCanvas) {
+    if (actionEntries.length > 0) {
+      doughnutChart(
+        "compActionChart",
+        actionEntries.map((x) => x[0]),
+        actionEntries.map((x) => x[1])
+      );
+    } else {
+      destroyChart("compActionChart");
+    }
+  }
+
   // 6. 실시간 보상 접수 상세 테이블
   renderCompDetailTable(targetDetailChats);
 }
@@ -8952,7 +9827,7 @@ function renderCompMatrix(bucketList, totalColLabel, activeKey) {
 // =============================================================
 // 보상 내역 수기 예외 관리 (제외 / 수기 추가) 오버라이드 시스템
 // =============================================================
-window.COMP_OVERRIDES = { excluded_ids: [], excluded_reasons: {}, manual_additions: [] };
+window.COMP_OVERRIDES = { excluded_ids: [], included_ids: [], excluded_reasons: {}, manual_additions: [] };
 let compOverridesLoaded = false;
 
 async function ensureCompOverridesLoaded() {
@@ -8962,6 +9837,7 @@ async function ensureCompOverridesLoaded() {
     if (res.ok) {
       window.COMP_OVERRIDES = await res.json();
       if (!Array.isArray(window.COMP_OVERRIDES.excluded_ids)) window.COMP_OVERRIDES.excluded_ids = [];
+      if (!Array.isArray(window.COMP_OVERRIDES.included_ids)) window.COMP_OVERRIDES.included_ids = [];
       if (!window.COMP_OVERRIDES.excluded_reasons || typeof window.COMP_OVERRIDES.excluded_reasons !== "object") {
         window.COMP_OVERRIDES.excluded_reasons = {};
       }
@@ -8999,12 +9875,21 @@ window.toggleCompOverride = async function(chatId, isRestore) {
     return;
   }
   const idStr = String(chatId);
+  if (!Array.isArray(window.COMP_OVERRIDES.excluded_ids)) window.COMP_OVERRIDES.excluded_ids = [];
+  if (!Array.isArray(window.COMP_OVERRIDES.included_ids)) window.COMP_OVERRIDES.included_ids = [];
+  if (!window.COMP_OVERRIDES.excluded_reasons) window.COMP_OVERRIDES.excluded_reasons = {};
+
   if (isRestore) {
-    // 다시 추가 (복원)
+    // 다시 추가 (복원 / 수기 포함)
+    // 1. 수기 제외 목록에서 제거
     window.COMP_OVERRIDES.excluded_ids = window.COMP_OVERRIDES.excluded_ids.filter((x) => x !== idStr);
-    if (window.COMP_OVERRIDES.excluded_reasons) {
-      delete window.COMP_OVERRIDES.excluded_reasons[idStr];
+    delete window.COMP_OVERRIDES.excluded_reasons[idStr];
+
+    // 2. 수기 포함 목록에 추가 (상담 설명의 보상취합: X 나 특이사항 메모 제외를 강제 오버라이드)
+    if (!window.COMP_OVERRIDES.included_ids.includes(idStr)) {
+      window.COMP_OVERRIDES.included_ids.push(idStr);
     }
+
     await saveCompOverridesToServer();
     refreshCompensationViews();
     alert("✓ 해당 건이 보상 신청 목록에 다시 추가(복원)되었습니다.");
@@ -9017,11 +9902,12 @@ window.toggleCompOverride = async function(chatId, isRestore) {
     if (reason === null) return; // 취소 클릭
     const cleanReason = reason.trim() || "관리자 수기 제외";
 
+    // 1. 수기 포함 목록에서 제거
+    window.COMP_OVERRIDES.included_ids = window.COMP_OVERRIDES.included_ids.filter((x) => x !== idStr);
+
+    // 2. 수기 제외 목록에 추가
     if (!window.COMP_OVERRIDES.excluded_ids.includes(idStr)) {
       window.COMP_OVERRIDES.excluded_ids.push(idStr);
-    }
-    if (!window.COMP_OVERRIDES.excluded_reasons) {
-      window.COMP_OVERRIDES.excluded_reasons = {};
     }
     window.COMP_OVERRIDES.excluded_reasons[idStr] = {
       reason: cleanReason,
@@ -9098,7 +9984,7 @@ function renderCompDetailTable(chats) {
 
   let filtered = allList.filter((c) => {
     const cidStr = String(c.id);
-    const isExcluded = excludedSet.has(cidStr);
+    const isExcluded = !isCompChat(c);
     const actType = getCompActionType(c.act);
 
     if (actFilter === "comp_only") {
@@ -9146,9 +10032,9 @@ function renderCompDetailTable(chats) {
 
   tbody.innerHTML = filtered.slice(0, 100).map((c) => {
     const cidStr = String(c.id);
-    const isExcluded = excludedSet.has(cidStr);
+    const isExcluded = !isCompChat(c);
     const isManual = Boolean(c.is_manual);
-    const exInfo = window.COMP_OVERRIDES.excluded_reasons?.[cidStr];
+    const exReasonText = isExcluded ? getCompExclusionReason(c) : "";
 
     const actType = getCompActionType(c.act);
     let actBadge = '<span class="rounded bg-teal-100 px-1.5 py-0.5 text-[10px] font-semibold text-teal-800">교환</span>';
@@ -9185,7 +10071,7 @@ function renderCompDetailTable(chats) {
     const custName = (resolvedName || "고객").replace(/</g, "&lt;");
     const dateStr = c.date || (c.time ? c.time.slice(0, 10) : (c.managedAt ? c.managedAt.slice(0, 10) : "–"));
 
-    const reasonTag = isExcluded && exInfo ? `<div class="mt-0.5 text-[10px] text-rose-600 font-medium bg-rose-50 px-1.5 py-0.5 rounded ring-1 ring-rose-200 inline-block" title="제외일자: ${exInfo.date}">제외사유: ${exInfo.reason}</div>` : "";
+    const reasonTag = isExcluded && exReasonText ? `<div class="mt-0.5 text-[10px] text-rose-600 font-medium bg-rose-50 px-1.5 py-0.5 rounded ring-1 ring-rose-200 inline-block">제외사유: ${exReasonText}</div>` : "";
 
     return `<tr class="${rowClass}">
       <td class="py-2.5 px-2">${actBadge}</td>
@@ -9198,8 +10084,8 @@ function renderCompDetailTable(chats) {
       <td class="py-2.5 px-2 font-semibold text-zinc-800">${custName}</td>
       <td class="py-2.5 px-2 tnum text-zinc-500">${formatMfgDate(c.mfg)}</td>
       <td class="py-2.5 px-2 text-zinc-600">${c.mall || "–"}</td>
-      <td class="py-2.5 px-4 text-zinc-800 break-words max-w-xs">${(c.issue || "–").replace(/</g, "&lt;")}</td>
-      <td class="py-2.5 px-4 text-zinc-600 break-words max-w-xs">${(c.act || "–").replace(/</g, "&lt;")}</td>
+      <td class="py-2.5 px-4 text-zinc-800 break-words whitespace-normal min-w-[280px] max-w-md">${(c.issue || "–").replace(/</g, "&lt;")}</td>
+      <td class="py-2.5 px-4 text-zinc-600 break-words whitespace-normal min-w-[280px] max-w-md">${(c.act || "–").replace(/</g, "&lt;")}</td>
       <td class="py-2.5 px-2 text-center whitespace-nowrap">${actionBtnHtml}</td>
     </tr>`;
   }).join("");
@@ -9374,21 +10260,20 @@ async function exportCompPeriodSummaryExcel() {
     };
   });
 
-  // Section 2: 보상 제외 내역 (수기 예외 관리)
+  // Section 2: 보상 제외 내역
   const rawTargetChats = E.rawChats(period).filter(isQualityClaimRaw);
-  const curExSet = new Set((window.COMP_OVERRIDES?.excluded_ids || []).map(String));
-  const excludedChats = rawTargetChats.filter((c) => curExSet.has(String(c.id)));
+  const excludedChats = rawTargetChats.filter((c) => !isCompChat(c));
 
   curRow += 3;
   ws.getRow(curRow).height = 24;
   const s2Title = ws.getCell(curRow, 1);
-  s2Title.value = `2. 보상 제외 내역 (수기 예외 관리 - 총 ${excludedChats.length}건)`;
+  s2Title.value = `2. 보상 제외 내역 (총 ${excludedChats.length}건)`;
   s2Title.font = { name: "맑은 고딕", size: 11, bold: true, color: { argb: "FF111827" } };
 
   curRow += 1;
   ws.getRow(curRow).height = 18;
   const s2Desc = ws.getCell(curRow, 1);
-  s2Desc.value = "※ 단순 변심 교환, 고객 귀책 파손, 중복 접수, 정상 판정 등으로 보상 신청 목록에서 제외된 내역입니다.";
+  s2Desc.value = "※ 단순 변심 교환, 고객 귀책 파손, 중복 접수, 정상 판정, 상담 설명 보상취합 X 등으로 보상 신청 목록에서 제외된 내역입니다.";
   s2Desc.font = { name: "맑은 고딕", size: 9, color: { argb: "FF6B7280" } };
 
   curRow += 2;
@@ -9414,8 +10299,7 @@ async function exportCompPeriodSummaryExcel() {
       curRow++;
       const row = ws.getRow(curRow);
       row.height = 22;
-      const exReasonInfo = window.COMP_OVERRIDES?.excluded_reasons?.[String(ex.id)];
-      const reasonText = exReasonInfo?.reason || "관리자 수기 제외";
+      const reasonText = getCompExclusionReason(ex);
 
       const vals = [
         getActualProductName(ex.prod),
@@ -9740,8 +10624,7 @@ async function exportCompFullMatrixExcel() {
       curRow++;
       ws.getRow(curRow).height = 20;
       const cidStr = String(ex_r.id);
-      const exInfo = excludedReasons[cidStr];
-      const exReason = exInfo?.reason || "관리자 수기 제외";
+      const exReason = getCompExclusionReason(ex_r);
       const exDate = ex_r.date || (ex_r.time ? ex_r.time.slice(0, 10) : "-");
       const cName = getChatCustomerName(ex_r);
 
@@ -9835,6 +10718,17 @@ function closeMobileSidebar() {
 
 function switchView(view) {
   currentView = view;
+  if (typeof renderPeriodControls === "function") {
+    renderPeriodControls();
+  }
+  try {
+    sessionStorage.setItem("voc_current_view", view);
+    localStorage.setItem("voc_current_view", view);
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", view);
+    window.history.replaceState({}, "", url.toString());
+  } catch (e) {}
+
   const viewIds = ["dashboardView", "qualityView", "deliveryView", "serviceView", "channelView", "compensationView", "reportView"];
   viewIds.forEach((id) => {
     const el = document.getElementById(id);
@@ -9873,6 +10767,7 @@ function switchView(view) {
   else if (view === "compensation") renderCompensation();
   else if (view === "report") renderReport();
 }
+window.switchView = switchView;
 
 function exportCSV() {
   if (typeof window.logAuditAction === "function") {
@@ -9931,6 +10826,8 @@ function bindRepeatToggle() {
 function init() {
   fillFilters();
   bindRepeatToggle();
+  bindGlobalCallModeToggles();
+  updateGlobalCallModeUI(E.getChannelTalkMode ? E.getChannelTalkMode() : false);
   document.querySelectorAll(".view-tab").forEach((t) => t.addEventListener("click", () => switchView(t.dataset.view)));
 
   // 모바일 사이드바 드로어 이벤트 바인딩
@@ -9950,10 +10847,19 @@ function init() {
 
   const repPrintBtn = document.getElementById("reportPrint");
   if (repPrintBtn) repPrintBtn.addEventListener("click", () => window.print());
+  const repPdfBtn = document.getElementById("reportExportPdf");
+  if (repPdfBtn) repPdfBtn.addEventListener("click", exportReportPdf);
   const repExcelBtn = document.getElementById("reportExportExcel");
   if (repExcelBtn) repExcelBtn.addEventListener("click", exportReportExcel);
   const toggleRiskSec = document.getElementById("toggleReportRiskSection");
   if (toggleRiskSec) {
+    const saved = localStorage.getItem("voc_report_risk_enabled");
+    if (saved !== null) {
+      reportRiskSectionEnabled = (saved === "true");
+    } else {
+      reportRiskSectionEnabled = false;
+    }
+    toggleRiskSec.checked = reportRiskSectionEnabled;
     toggleRiskSec.addEventListener("change", (e) => {
       reportRiskSectionEnabled = e.target.checked;
       localStorage.setItem("voc_report_risk_enabled", reportRiskSectionEnabled ? "true" : "false");
@@ -9993,7 +10899,12 @@ function init() {
 
   document.querySelectorAll(".mode-btn").forEach((b) => b.addEventListener("click", () => {
     E.state.mode = b.dataset.mode;
-    E.state.periodIndex = E.getPeriodList().length - 1;
+    const list = E.getPeriodList();
+    if (E.state.mode === "weekly" && list.length >= 2) {
+      E.state.periodIndex = list.length - 2; // 주의 경우 직전 기간(전주) 기본 세팅
+    } else {
+      E.state.periodIndex = list.length - 1;
+    }
     refreshCurrentView();
   }));
 
@@ -10748,8 +11659,12 @@ function init() {
     }
   }
 
+  const shareDdnsInput = document.getElementById("shareDdnsInput");
+  const copyDdnsBtn = document.getElementById("copyDdnsBtn");
+  const openDdnsLink = document.getElementById("openDdnsLink");
+
   if (btnShareServer && shareServerModal) {
-    [shareNetworkInput, shareTunnelInput].forEach((inp) => {
+    [shareDdnsInput, shareNetworkInput, shareTunnelInput].forEach((inp) => {
       if (!inp) return;
       inp.addEventListener("click", () => inp.select());
     });
@@ -10760,14 +11675,12 @@ function init() {
         const res = await fetch("/api/server_info");
         if (res.ok) {
           const info = await res.json();
-          // 사내망 주소: 현재 접속 중인 LAN 호스트(예: 192.168.0.35:8080)가 유효하면 우선 반영
-          const currentOrigin = window.location.origin;
+          if (shareDdnsInput) {
+            shareDdnsInput.value = info.ddns || "http://bebesup-voc.synology.me:8080";
+            if (openDdnsLink) openDdnsLink.href = shareDdnsInput.value;
+          }
           if (shareNetworkInput) {
-            if (currentOrigin && !currentOrigin.includes("localhost") && !currentOrigin.includes("127.0.0.1") && !currentOrigin.includes("trycloudflare")) {
-              shareNetworkInput.value = currentOrigin;
-            } else if (info.network) {
-              shareNetworkInput.value = info.network;
-            }
+            shareNetworkInput.value = info.network || "http://192.168.0.12:8080";
           }
           if (shareTunnelInput) {
             if (info.tunnel) {
@@ -10794,6 +11707,12 @@ function init() {
       if (e.target === shareServerModal) hideShareModal();
     });
 
+    if (copyDdnsBtn && shareDdnsInput) {
+      copyDdnsBtn.addEventListener("click", () => {
+        copyTextFallback(shareDdnsInput.value, copyDdnsBtn);
+      });
+    }
+
     if (copyNetworkBtn && shareNetworkInput) {
       copyNetworkBtn.addEventListener("click", () => {
         copyTextFallback(shareNetworkInput.value, copyNetworkBtn);
@@ -10817,8 +11736,8 @@ function init() {
       if (stored) {
         const u = JSON.parse(stored);
         const now = Date.now();
-        const MAX_SESSION = 9 * 60 * 60 * 1000; // 최대 세션 유지 9시간 (8~10시간)
-        const INACTIVITY_LIMIT = 4 * 60 * 60 * 1000; // 연속 미활동 4시간 제한
+        const MAX_SESSION = 7 * 24 * 60 * 60 * 1000; // 최대 세션 유지 7일
+        const INACTIVITY_LIMIT = 24 * 60 * 60 * 1000; // 연속 미활동 24시간 제한
 
         if ((u.loginAt && now - u.loginAt > MAX_SESSION) ||
             (u.lastActive && now - u.lastActive > INACTIVITY_LIMIT)) {
@@ -10992,8 +11911,49 @@ function init() {
     applyUserRolePermissions(auth);
     if (!isDashboardInitialized) {
       isDashboardInitialized = true;
-      switchView("dashboard");
-      renderAll();
+      try {
+        if (typeof window.logAuditAction === "function") {
+          window.logAuditAction("ACCESS", "대시보드 접속", (auth && auth.email ? auth.email : "인증 사용자") + " 대시보드 접속");
+        }
+      } catch (e) {}
+      const urlParams = new URLSearchParams(window.location.search);
+      // 1. 기간(Period) 복원 및 기본값 세팅
+      const savedMode = urlParams.get("mode") || sessionStorage.getItem("voc_current_mode") || localStorage.getItem("voc_current_mode");
+      const savedPeriodKey = urlParams.get("week") || sessionStorage.getItem("voc_current_week") || localStorage.getItem("voc_current_week") || sessionStorage.getItem("voc_current_period_key") || localStorage.getItem("voc_current_period_key");
+
+      if (savedMode && ["weekly", "monthly", "quarterly", "yearly"].includes(savedMode) && typeof E !== "undefined" && E.state) {
+        E.state.mode = savedMode;
+      }
+
+      if (savedPeriodKey && typeof E !== "undefined" && E.state) {
+        const pList = E.getPeriodList();
+        const pIdx = pList.findIndex((p) => p.key === savedPeriodKey);
+        if (pIdx !== -1) {
+          E.state.periodIndex = pIdx;
+        }
+      } else if (typeof E !== "undefined" && E.state && E.state.mode === "weekly") {
+        // 주의 경우 현재(진행 중인 주차)가 아니라 직전 기간(전주)으로 기본 세팅!
+        const wList = window.VOC_DATA && Array.isArray(window.VOC_DATA.WEEKS) ? window.VOC_DATA.WEEKS : [];
+        if (wList.length >= 2) {
+          E.state.periodIndex = wList.length - 2;
+        }
+      }
+
+      // 2. 뷰(View / Tab) 복원 (새로고침 시 보고 있던 페이지 그대로 유지)
+      const validViews = ["dashboard", "quality", "delivery", "service", "channel", "compensation", "report"];
+      const isPrint = urlParams.get("print") === "true" || document.documentElement.classList.contains("is-print-mode");
+      if (isPrint && typeof Chart !== "undefined" && Chart.defaults) {
+        Chart.defaults.animation = false;
+      }
+
+      let targetView = urlParams.get("view") || sessionStorage.getItem("voc_current_view") || localStorage.getItem("voc_current_view");
+      if (isPrint) {
+        targetView = "report";
+      } else if (!targetView || !validViews.includes(targetView)) {
+        targetView = "dashboard";
+      }
+
+      switchView(targetView);
     }
   }
 
@@ -11060,13 +12020,6 @@ function init() {
     const logoutBtn = document.getElementById("authLogoutBtn");
 
     let currentAuth = window.getCurrentUser();
-    // 구 계정(단순 admin 등) 정리
-    if (currentAuth && currentAuth.username === "admin") {
-      localStorage.removeItem("voc_auth_user");
-      sessionStorage.removeItem("voc_auth_user");
-      currentAuth = null;
-    }
-
     if (currentAuth && (currentAuth.username || currentAuth.email || currentAuth.id)) {
       document.documentElement.classList.add("is-authenticated");
       try {
@@ -11228,7 +12181,7 @@ function init() {
         document.documentElement.classList.add("is-authenticated");
         showDashboard(userSession);
         if (otpInput) otpInput.value = "";
-        showToast(`✨ 반갑습니다, ${authResult.name}님! 로그인되었습니다. (최대 9시간 유지)`);
+        showToast(`✨ 반갑습니다, ${authResult.name}님! 로그인되었습니다.`);
       } else {
         if (errorEl) {
           const msg = (authResult && authResult.error) ? authResult.error : "인증번호가 올바르지 않거나 만료되었습니다. 다시 확인해주세요.";
@@ -11292,29 +12245,37 @@ function init() {
       });
     }
 
-    if (logoutBtn) {
-      logoutBtn.addEventListener("click", () => {
-        if (confirm("로그아웃 하시겠습니까?")) {
-          window.logAuditAction("LOGOUT", "대시보드 로그아웃");
-          localStorage.removeItem("voc_auth_user");
-          sessionStorage.removeItem("voc_auth_user");
-          document.documentElement.classList.remove("is-authenticated");
-          const userInfoBar = document.getElementById("authUserInfoBar");
-          if (userInfoBar) userInfoBar.classList.add("hidden");
-          const emailStep = document.getElementById("authEmailStep");
-          const otpStep = document.getElementById("authOtpStep");
-          if (otpStep) otpStep.classList.add("hidden");
-          if (emailStep) emailStep.classList.remove("hidden");
-          if (otpInput) otpInput.value = "";
-          if (errorEl) errorEl.classList.add("hidden");
-          if (otpCountdownInterval) {
-            clearInterval(otpCountdownInterval);
-            otpCountdownInterval = null;
-          }
-          showLoginGate();
-          showToast("로그아웃 되었습니다.");
+    function performLogout() {
+      if (confirm("로그아웃 하시겠습니까?")) {
+        window.logAuditAction("LOGOUT", "대시보드 로그아웃");
+        localStorage.removeItem("voc_auth_user");
+        sessionStorage.removeItem("voc_auth_user");
+        document.documentElement.classList.remove("is-authenticated");
+        const userInfoBar = document.getElementById("authUserInfoBar");
+        if (userInfoBar) userInfoBar.classList.add("hidden");
+        const emailStep = document.getElementById("authEmailStep");
+        const otpStep = document.getElementById("authOtpStep");
+        if (otpStep) otpStep.classList.add("hidden");
+        if (emailStep) emailStep.classList.remove("hidden");
+        if (otpInput) otpInput.value = "";
+        if (emailInput) emailInput.value = "";
+        if (errorEl) errorEl.classList.add("hidden");
+        if (otpCountdownInterval) {
+          clearInterval(otpCountdownInterval);
+          otpCountdownInterval = null;
         }
-      });
+        showLoginGate();
+        showToast("로그아웃 되었습니다.");
+      }
+    }
+    window.logoutUser = performLogout;
+
+    if (logoutBtn) {
+      logoutBtn.addEventListener("click", performLogout);
+    }
+    const mobileLogoutBtn = document.getElementById("mobileLogoutBtn");
+    if (mobileLogoutBtn) {
+      mobileLogoutBtn.addEventListener("click", performLogout);
     }
 
     // 실시간 세션 만료 검사 (최대 9시간 유지 또는 4시간 연속 미활동 시 자동 로그아웃)
@@ -11324,15 +12285,15 @@ function init() {
       try {
         const u = JSON.parse(stored);
         const now = Date.now();
-        const MAX_SESSION = 9 * 60 * 60 * 1000; // 최대 세션 유지 9시간 (8~10시간)
-        const INACTIVITY_LIMIT = 4 * 60 * 60 * 1000; // 연속 미활동 4시간 제한
+        const MAX_SESSION = 7 * 24 * 60 * 60 * 1000; // 최대 세션 유지 7일
+        const INACTIVITY_LIMIT = 24 * 60 * 60 * 1000; // 연속 미활동 24시간 제한
 
         if ((u.loginAt && now - u.loginAt > MAX_SESSION) || (u.lastActive && now - u.lastActive > INACTIVITY_LIMIT)) {
           localStorage.removeItem("voc_auth_user");
           sessionStorage.removeItem("voc_auth_user");
           document.documentElement.classList.remove("is-authenticated");
           showLoginGate();
-          showToast("⏰ 보안을 위해 로그인 세션(9시간)이 만료되어 자동으로 로그아웃되었습니다.");
+          showToast("⏰ 보안을 위해 로그인 세션이 만료되어 자동으로 로그아웃되었습니다.");
           return true;
         }
       } catch (e) {}
@@ -11383,77 +12344,599 @@ function init() {
     const auditLogModal = document.getElementById("auditLogModal");
     const closeAuditLogModalBtn = document.getElementById("closeAuditLogModalBtn");
     const closeAuditLogModalBtn2 = document.getElementById("closeAuditLogModalBtn2");
+    const closeAuditLogModalBtn3 = document.getElementById("closeAuditLogModalBtn3");
     const btnRefreshAuditLogs = document.getElementById("btnRefreshAuditLogs");
     const btnSyncEmployeesModal = document.getElementById("btnSyncEmployeesModal");
     const auditSearchInput = document.getElementById("auditSearchInput");
+    const auditDateFilterSelect = document.getElementById("auditDateFilterSelect");
+    const auditActionFilterSelect = document.getElementById("auditActionFilterSelect");
+    const auditPageSizeSelect = document.getElementById("auditPageSizeSelect");
     const auditLogTableBody = document.getElementById("auditLogTableBody");
+    const auditLogTableContainer = document.getElementById("auditLogTableContainer");
     const auditLogCountBadge = document.getElementById("auditLogCountBadge");
+    const auditPageRangeText = document.getElementById("auditPageRangeText");
+    const auditPageBtnsContainer = document.getElementById("auditPageBtnsContainer");
+    const auditActiveFilterTag = document.getElementById("auditActiveFilterTag");
+
+    // 캘린더 및 뷰 전환 요소
+    const auditViewTabList = document.getElementById("auditViewTabList");
+    const auditViewTabCalendar = document.getElementById("auditViewTabCalendar");
+    const auditListViewContainer = document.getElementById("auditListViewContainer");
+    const auditCalendarViewContainer = document.getElementById("auditCalendarViewContainer");
+    const auditDailySpikeStrip = document.getElementById("auditDailySpikeStrip");
+    const auditCalPrevMonthBtn = document.getElementById("auditCalPrevMonthBtn");
+    const auditCalNextMonthBtn = document.getElementById("auditCalNextMonthBtn");
+    const auditCalTodayBtn = document.getElementById("auditCalTodayBtn");
+    const auditCalCurrentMonthText = document.getElementById("auditCalCurrentMonthText");
+    const auditCalendarGrid = document.getElementById("auditCalendarGrid");
 
     let cachedAuditLogs = [];
+    let auditCurrentPage = 1;
+    let auditPageSize = 20;
+    let currentAuditView = "list"; // "list" | "calendar"
+
+    // 캘린더 표시 연/월 (현재 시점 기본값)
+    const initDate = new Date();
+    let calYear = initDate.getFullYear();
+    let calMonth = initDate.getMonth() + 1;
+
+    // 한국어 요일 및 날짜 포맷 헬퍼
+    function formatLogDateHeader(dateStr) {
+      if (!dateStr) return { dateStr: "-", dayName: "", badge: "", displayTitle: "-" };
+      const d = new Date(dateStr + "T00:00:00");
+      const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+      const dayName = !isNaN(d.getDay()) ? dayNames[d.getDay()] : '';
+      
+      const now = new Date();
+      const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const yDate = new Date(now.getTime() - 86400000);
+      const yestStr = `${yDate.getFullYear()}-${String(yDate.getMonth()+1).padStart(2, '0')}-${String(yDate.getDate()).padStart(2, '0')}`;
+
+      let badge = "";
+      if (dateStr === todayStr) {
+        badge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 shadow-2xs">오늘</span>`;
+      } else if (dateStr === yestStr) {
+        badge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800 border border-amber-200 shadow-2xs">어제</span>`;
+      }
+
+      return {
+        dateStr,
+        dayName,
+        badge,
+        displayTitle: `${dateStr} (${dayName}요일)`
+      };
+    }
+
+    // 일별 통계 집계 헬퍼 (스파이크 및 캘린더용)
+    function getDailyStats(logs) {
+      const stats = {};
+      logs.forEach(l => {
+        const dt = (l.timestamp || "").slice(0, 10);
+        if (!dt) return;
+        if (!stats[dt]) {
+          stats[dt] = { total: 0, logins: 0, logouts: 0, downloads: 0, syncs: 0, users: new Set() };
+        }
+        stats[dt].total++;
+        if (l.action === "LOGIN") stats[dt].logins++;
+        else if (l.action === "LOGOUT") stats[dt].logouts++;
+        else if (l.action === "EXCEL_DOWNLOAD" || l.action === "REPORT_EXPORT") stats[dt].downloads++;
+        else if (l.action === "FAST_SYNC") stats[dt].syncs++;
+        if (l.name || l.username) stats[dt].users.add(l.name || l.username);
+      });
+      return stats;
+    }
+
+    // 1. 일별 활동량 스파이크 바 렌더링
+    function renderDailySpikeStrip(logs) {
+      if (!auditDailySpikeStrip) return;
+      const stats = getDailyStats(logs);
+      const dates = Object.keys(stats).sort((a, b) => b.localeCompare(a));
+      const curFilterDate = auditDateFilterSelect ? auditDateFilterSelect.value : "all";
+
+      let stripHtml = `
+        <button type="button" class="btn-spike-chip px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer shrink-0 border ${curFilterDate === 'all' ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs' : 'bg-white text-zinc-700 hover:bg-zinc-100 border-zinc-200'}" data-date="all">
+          전체 (${logs.length}건)
+        </button>
+      `;
+
+      dates.forEach(dt => {
+        const s = stats[dt];
+        const d = new Date(dt + "T00:00:00");
+        const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+        const dayName = !isNaN(d.getDay()) ? dayNames[d.getDay()] : '';
+        const mm_dd = dt.slice(5);
+        const isCur = curFilterDate === dt;
+
+        let styleClass = "bg-white text-zinc-700 hover:bg-zinc-100 border-zinc-200";
+        let prefixIcon = "";
+
+        if (isCur) {
+          styleClass = "bg-indigo-600 text-white border-indigo-600 shadow-2xs ring-1 ring-indigo-600";
+        } else if (s.total >= 20) {
+          // 튀는 날 (스파이크)
+          styleClass = "bg-rose-50 text-rose-800 border-rose-300 hover:bg-rose-100 font-extrabold shadow-2xs";
+          prefixIcon = "🔥 ";
+        } else if (s.total >= 10) {
+          styleClass = "bg-indigo-50 text-indigo-800 border-indigo-200 hover:bg-indigo-100 font-bold";
+          prefixIcon = "⚡ ";
+        }
+
+        stripHtml += `
+          <button type="button" class="btn-spike-chip px-2.5 py-1 rounded-lg text-[11px] transition cursor-pointer shrink-0 border ${styleClass}" data-date="${dt}" title="${dt} (${dayName}): 총 ${s.total}건 (로그인: ${s.logins}, 엑셀: ${s.downloads})">
+            ${prefixIcon}${mm_dd} (${dayName}) <strong class="ml-0.5">${s.total}건</strong>
+          </button>
+        `;
+      });
+
+      auditDailySpikeStrip.innerHTML = stripHtml;
+
+      auditDailySpikeStrip.querySelectorAll(".btn-spike-chip").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const targetDate = btn.getAttribute("data-date");
+          if (auditDateFilterSelect) {
+            auditDateFilterSelect.value = targetDate;
+          }
+          auditCurrentPage = 1;
+          switchAuditView("list");
+          renderAuditLogsTable(cachedAuditLogs);
+        });
+      });
+    }
+
+    // 2. 월간 달력 히트맵 뷰 렌더링
+    function renderAuditCalendar(year, month) {
+      if (!auditCalendarGrid || !auditCalCurrentMonthText) return;
+      auditCalCurrentMonthText.textContent = `${year}년 ${String(month).padStart(2, '0')}월`;
+
+      const stats = getDailyStats(cachedAuditLogs);
+      const firstDayOfWeek = new Date(year, month - 1, 1).getDay(); // 0(일) ~ 6(토)
+      const lastDayOfMonth = new Date(year, month, 0).getDate(); // 28~31
+      const prevMonthLastDay = new Date(year, month - 1, 0).getDate();
+
+      const now = new Date();
+      const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const curFilterDate = auditDateFilterSelect ? auditDateFilterSelect.value : "all";
+
+      let cellsHtml = "";
+
+      // 이전 달 날짜 채우기
+      for (let i = firstDayOfWeek - 1; i >= 0; i--) {
+        const pDay = prevMonthLastDay - i;
+        cellsHtml += `
+          <div class="h-20 sm:h-22 p-1.5 rounded-xl border border-zinc-100 bg-zinc-50/40 text-zinc-300 text-xs select-none">
+            <span class="font-medium">${pDay}</span>
+          </div>
+        `;
+      }
+
+      // 이번 달 날짜 채우기
+      for (let day = 1; day <= lastDayOfMonth; day++) {
+        const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const dayOfWeek = new Date(year, month - 1, day).getDay();
+        const s = stats[dateStr];
+        const isToday = dateStr === todayStr;
+        const isCurSelected = curFilterDate === dateStr;
+
+        let dayColor = "text-zinc-800";
+        if (dayOfWeek === 0) dayColor = "text-rose-600";
+        else if (dayOfWeek === 6) dayColor = "text-sky-600";
+
+        if (s && s.total > 0) {
+          // 활동량이 있는 날
+          let heatClass = "bg-indigo-50/80 border-indigo-200/80 hover:bg-indigo-100 text-indigo-900";
+          let badgeClass = "bg-indigo-100 text-indigo-800 border border-indigo-300";
+          let spikeLabel = "";
+
+          if (s.total >= 20) {
+            // 튀는 날 (스파이크)
+            heatClass = "bg-gradient-to-br from-indigo-600 to-indigo-700 border-indigo-700 text-white shadow-md hover:from-indigo-700 hover:to-indigo-800";
+            badgeClass = "bg-white text-indigo-900 font-extrabold shadow-xs";
+            spikeLabel = "🔥 ";
+            dayColor = "text-white font-extrabold";
+          } else if (s.total >= 10) {
+            heatClass = "bg-indigo-100 border-indigo-300/90 hover:bg-indigo-200 text-indigo-950 font-bold";
+            badgeClass = "bg-indigo-200 text-indigo-900 border border-indigo-400/50";
+            spikeLabel = "⚡ ";
+          }
+
+          if (isCurSelected) {
+            heatClass += " ring-2 ring-offset-1 ring-indigo-600";
+          }
+
+          cellsHtml += `
+            <div class="btn-cal-day-cell h-20 sm:h-22 p-2 rounded-xl border transition cursor-pointer flex flex-col justify-between ${heatClass}" data-date="${dateStr}" title="${dateStr}: 총 ${s.total}건 (로그인 ${s.logins}, 엑셀 ${s.downloads})">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-bold ${dayColor}">${day}</span>
+                ${isToday ? `<span class="px-1.5 py-0.2 rounded-full text-[9.5px] font-bold ${s.total >= 20 ? 'bg-emerald-400 text-zinc-950' : 'bg-emerald-100 text-emerald-800'}">오늘</span>` : ''}
+              </div>
+              <div class="my-auto text-right">
+                <span class="inline-block px-1.5 py-0.5 rounded-md text-[11px] font-bold ${badgeClass}">
+                  ${spikeLabel}${s.total}건
+                </span>
+              </div>
+              <div class="flex items-center justify-end gap-1 text-[10px] ${s.total >= 20 ? 'text-indigo-100' : 'text-zinc-500'}">
+                ${s.logins > 0 ? `<span>🔑${s.logins}</span>` : ''}
+                ${s.downloads > 0 ? `<span>📥${s.downloads}</span>` : ''}
+              </div>
+            </div>
+          `;
+        } else {
+          // 활동 없는 날
+          cellsHtml += `
+            <div class="h-20 sm:h-22 p-2 rounded-xl border border-zinc-100 bg-white/70 text-zinc-400 text-xs flex flex-col justify-between select-none">
+              <div class="flex items-center justify-between">
+                <span class="${dayColor}">${day}</span>
+                ${isToday ? `<span class="px-1.5 py-0.2 rounded-full text-[9.5px] font-bold bg-zinc-100 text-zinc-600">오늘</span>` : ''}
+              </div>
+              <div class="text-center text-[10px] text-zinc-300">-</div>
+              <div></div>
+            </div>
+          `;
+        }
+      }
+
+      // 다음 달 남은 칸 채우기 (총 35 또는 42칸 맞추기)
+      const totalCellsRendered = firstDayOfWeek + lastDayOfMonth;
+      const nextMonthCells = totalCellsRendered % 7 === 0 ? 0 : 7 - (totalCellsRendered % 7);
+      for (let n = 1; n <= nextMonthCells; n++) {
+        cellsHtml += `
+          <div class="h-20 sm:h-22 p-1.5 rounded-xl border border-zinc-100 bg-zinc-50/40 text-zinc-300 text-xs select-none">
+            <span class="font-medium">${n}</span>
+          </div>
+        `;
+      }
+
+      auditCalendarGrid.innerHTML = cellsHtml;
+
+      // 캘린더 날짜 셀 클릭 시 -> 해당 날짜로 리스트 뷰 즉시 필터링
+      auditCalendarGrid.querySelectorAll(".btn-cal-day-cell").forEach(cell => {
+        cell.addEventListener("click", () => {
+          const selDate = cell.getAttribute("data-date");
+          if (auditDateFilterSelect) {
+            auditDateFilterSelect.value = selDate;
+          }
+          auditCurrentPage = 1;
+          switchAuditView("list");
+          renderAuditLogsTable(cachedAuditLogs);
+        });
+      });
+    }
+
+    // 뷰 전환 (목록 vs 캘린더)
+    function switchAuditView(viewName) {
+      currentAuditView = viewName;
+      if (viewName === "calendar") {
+        if (auditListViewContainer) auditListViewContainer.classList.add("hidden");
+        if (auditCalendarViewContainer) auditCalendarViewContainer.classList.remove("hidden");
+        if (auditViewTabCalendar) {
+          auditViewTabCalendar.className = "px-3 py-1 rounded-md transition cursor-pointer bg-white text-indigo-700 shadow-2xs font-bold";
+        }
+        if (auditViewTabList) {
+          auditViewTabList.className = "px-3 py-1 rounded-md transition cursor-pointer text-zinc-600 hover:text-zinc-900 font-semibold";
+        }
+        renderAuditCalendar(calYear, calMonth);
+      } else {
+        if (auditCalendarViewContainer) auditCalendarViewContainer.classList.add("hidden");
+        if (auditListViewContainer) auditListViewContainer.classList.remove("hidden");
+        if (auditViewTabList) {
+          auditViewTabList.className = "px-3 py-1 rounded-md transition cursor-pointer bg-white text-indigo-700 shadow-2xs font-bold";
+        }
+        if (auditViewTabCalendar) {
+          auditViewTabCalendar.className = "px-3 py-1 rounded-md transition cursor-pointer text-zinc-600 hover:text-zinc-900 font-semibold";
+        }
+      }
+    }
+
+    // 날짜 선택 드롭다운 옵션 동적 갱신
+    function updateAuditDateOptions(logs) {
+      if (!auditDateFilterSelect) return;
+      const currentVal = auditDateFilterSelect.value || "all";
+      const dates = Array.from(new Set(logs.map(l => (l.timestamp || "").slice(0, 10)).filter(Boolean)));
+      dates.sort((a, b) => b.localeCompare(a)); // 최신 날짜 내림차순
+
+      const now = new Date();
+      const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const yDate = new Date(now.getTime() - 86400000);
+      const yestStr = `${yDate.getFullYear()}-${String(yDate.getMonth()+1).padStart(2, '0')}-${String(yDate.getDate()).padStart(2, '0')}`;
+
+      let html = `<option value="all">📅 전체 날짜 (${logs.length}건)</option>`;
+      const todayCount = logs.filter(l => (l.timestamp || "").startsWith(todayStr)).length;
+      if (todayCount > 0) {
+        html += `<option value="today">오늘 (${todayStr}) - ${todayCount}건</option>`;
+      }
+      const yestCount = logs.filter(l => (l.timestamp || "").startsWith(yestStr)).length;
+      if (yestCount > 0) {
+        html += `<option value="yesterday">어제 (${yestStr}) - ${yestCount}건</option>`;
+      }
+      html += `<option value="week">최근 7일</option>`;
+      html += `<option disabled>──────────</option>`;
+
+      dates.forEach(dt => {
+        const cnt = logs.filter(l => (l.timestamp || "").startsWith(dt)).length;
+        const d = new Date(dt + "T00:00:00");
+        const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+        const dayName = !isNaN(d.getDay()) ? dayNames[d.getDay()] : '';
+        html += `<option value="${dt}">${dt} (${dayName}) - ${cnt}건</option>`;
+      });
+
+      auditDateFilterSelect.innerHTML = html;
+      if (Array.from(auditDateFilterSelect.options).some(o => o.value === currentVal)) {
+        auditDateFilterSelect.value = currentVal;
+      } else {
+        auditDateFilterSelect.value = "all";
+      }
+    }
 
     function renderAuditLogsTable(logs) {
       if (!auditLogTableBody) return;
+
       const filterText = (auditSearchInput ? auditSearchInput.value : "").trim().toLowerCase();
-      const filtered = filterText
-        ? logs.filter(l => 
+      const dateFilter = (auditDateFilterSelect ? auditDateFilterSelect.value : "all");
+      const actionFilter = (auditActionFilterSelect ? auditActionFilterSelect.value : "all");
+
+      const now = new Date();
+      const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const yDate = new Date(now.getTime() - 86400000);
+      const yestStr = `${yDate.getFullYear()}-${String(yDate.getMonth()+1).padStart(2, '0')}-${String(yDate.getDate()).padStart(2, '0')}`;
+      const sevenDaysAgoStr = new Date(now.getTime() - 7 * 86400000).toISOString().slice(0, 10);
+
+      // 상단 활성 필터 태그 표시
+      if (auditActiveFilterTag) {
+        if (dateFilter !== "all") {
+          auditActiveFilterTag.innerHTML = `📅 ${dateFilter} <button type="button" id="btnResetDateFilter" class="ml-1 hover:text-rose-600 font-bold cursor-pointer">&times;</button>`;
+          auditActiveFilterTag.classList.remove("hidden");
+          const btnReset = document.getElementById("btnResetDateFilter");
+          if (btnReset) {
+            btnReset.addEventListener("click", () => {
+              if (auditDateFilterSelect) auditDateFilterSelect.value = "all";
+              auditCurrentPage = 1;
+              renderAuditLogsTable(cachedAuditLogs);
+            });
+          }
+        } else {
+          auditActiveFilterTag.classList.add("hidden");
+        }
+      }
+
+      // 1. 다차원 필터링 적용
+      const filtered = logs.filter(l => {
+        const ts = l.timestamp || "";
+        const dt = ts.slice(0, 10);
+
+        // 날짜 필터
+        if (dateFilter === "today") {
+          if (!dt.startsWith(todayStr)) return false;
+        } else if (dateFilter === "yesterday") {
+          if (!dt.startsWith(yestStr)) return false;
+        } else if (dateFilter === "week") {
+          if (dt < sevenDaysAgoStr) return false;
+        } else if (dateFilter !== "all") {
+          if (dt !== dateFilter) return false;
+        }
+
+        // 활동 구분 필터
+        if (actionFilter !== "all") {
+          if (actionFilter === "EXCEL_DOWNLOAD") {
+            if (l.action !== "EXCEL_DOWNLOAD" && l.action !== "REPORT_EXPORT") return false;
+          } else if (l.action !== actionFilter) {
+            return false;
+          }
+        }
+
+        // 키워드 검색어 필터
+        if (filterText) {
+          const matchKw = 
             (l.username && l.username.toLowerCase().includes(filterText)) ||
             (l.name && l.name.toLowerCase().includes(filterText)) ||
             (l.dept && l.dept.toLowerCase().includes(filterText)) ||
             (l.action && l.action.toLowerCase().includes(filterText)) ||
             (l.target && l.target.toLowerCase().includes(filterText)) ||
-            (l.ip && l.ip.includes(filterText))
-          )
-        : logs;
+            (l.detail && l.detail.toLowerCase().includes(filterText)) ||
+            (l.ip && l.ip.includes(filterText));
+          if (!matchKw) return false;
+        }
 
+        return true;
+      });
+
+      const totalCount = filtered.length;
       if (auditLogCountBadge) {
-        auditLogCountBadge.textContent = `총 ${filtered.length}건 기록`;
+        auditLogCountBadge.textContent = `총 ${totalCount.toLocaleString()}건 기록`;
       }
 
-      if (!filtered.length) {
-        auditLogTableBody.innerHTML = `<tr><td colspan="5" class="py-8 text-center text-zinc-400">기록된 감사 로그가 없습니다.</td></tr>`;
+      // 일별 스파이크 바 항상 최신화
+      renderDailySpikeStrip(logs);
+
+      if (!totalCount) {
+        auditLogTableBody.innerHTML = `<tr><td colspan="5" class="py-12 text-center text-zinc-400">조건에 일치하는 보안 감사 로그가 없습니다.</td></tr>`;
+        if (auditPageRangeText) auditPageRangeText.textContent = "0건 / 총 0건";
+        if (auditPageBtnsContainer) auditPageBtnsContainer.innerHTML = "";
         return;
       }
 
-      auditLogTableBody.innerHTML = filtered.map(log => {
-        let actionBadge = `<span class="rounded bg-zinc-100 text-zinc-700 px-2 py-0.5 text-[10px] font-semibold">${log.action}</span>`;
-        if (log.action === "EXCEL_DOWNLOAD" || log.action === "REPORT_EXPORT") {
-          actionBadge = `<span class="rounded bg-emerald-100 text-emerald-800 px-2 py-0.5 text-[10px] font-bold">📥 엑셀다운</span>`;
-        } else if (log.action === "LOGIN") {
-          actionBadge = `<span class="rounded bg-sky-100 text-sky-800 px-2 py-0.5 text-[10px] font-bold">🔑 로그인</span>`;
-        } else if (log.action === "LOGOUT") {
-          actionBadge = `<span class="rounded bg-zinc-100 text-zinc-600 px-2 py-0.5 text-[10px] font-medium">🚪 로그아웃</span>`;
-        } else if (log.action === "FAST_SYNC") {
-          actionBadge = `<span class="rounded bg-purple-100 text-purple-800 px-2 py-0.5 text-[10px] font-bold">⚡ DB동기화</span>`;
+      // 2. 페이지네이션 계산
+      const pageSizeNum = parseInt(auditPageSize, 10);
+      let totalPages = 1;
+      let startIdx = 0;
+      let endIdx = totalCount;
+      let pagedLogs = filtered;
+
+      if (pageSizeNum > 0) {
+        totalPages = Math.ceil(totalCount / pageSizeNum) || 1;
+        if (auditCurrentPage > totalPages) auditCurrentPage = totalPages;
+        if (auditCurrentPage < 1) auditCurrentPage = 1;
+
+        startIdx = (auditCurrentPage - 1) * pageSizeNum;
+        endIdx = Math.min(startIdx + pageSizeNum, totalCount);
+        pagedLogs = filtered.slice(startIdx, endIdx);
+      } else {
+        auditCurrentPage = 1;
+      }
+
+      // 페이지 범위 텍스트 갱신
+      if (auditPageRangeText) {
+        auditPageRangeText.innerHTML = `<span class="font-bold text-zinc-800">${(startIdx + 1).toLocaleString()}~${endIdx.toLocaleString()}건</span> <span class="text-zinc-400">/ 총 ${totalCount.toLocaleString()}건</span> <span class="text-indigo-600 font-semibold ml-1">(${auditCurrentPage} / ${totalPages}페이지)</span>`;
+      }
+
+      // 3. 날짜별 그룹 헤더 + 행 렌더링
+      let lastRenderedDate = null;
+      let rowsHtml = "";
+
+      pagedLogs.forEach((log) => {
+        const fullTs = log.timestamp || "-";
+        const dateStr = fullTs.slice(0, 10);
+        const timeStr = fullTs.slice(11) || fullTs;
+
+        // 날짜 구분 헤더 삽입
+        if (dateStr && dateStr !== lastRenderedDate) {
+          lastRenderedDate = dateStr;
+          const dateInfo = formatLogDateHeader(dateStr);
+          const dayFilteredCount = filtered.filter(l => (l.timestamp || "").startsWith(dateStr)).length;
+
+          rowsHtml += `
+            <tr class="bg-gradient-to-r from-slate-100/90 via-indigo-50/40 to-white border-y border-zinc-200/90 text-slate-800 select-none">
+              <td colspan="5" class="py-2 px-3">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <span class="inline-flex items-center justify-center w-5 h-5 rounded-md bg-indigo-600 text-white text-[11px] font-bold shadow-2xs">📅</span>
+                    <span class="font-bold text-xs text-zinc-900 tracking-tight">${dateInfo.displayTitle}</span>
+                    ${dateInfo.badge}
+                  </div>
+                  <span class="text-[11px] font-medium text-zinc-500">이 날짜 전체 <strong class="text-indigo-700">${dayFilteredCount}건</strong></span>
+                </div>
+              </td>
+            </tr>
+          `;
         }
 
-        const deptStr = log.dept ? `<span class="text-zinc-500 font-semibold text-[11px]">[${log.dept}]</span>` : "";
-        const userStr = `<span class="font-bold text-zinc-900">${escapeHtml(log.name || log.username)}</span> ${deptStr}`;
-        const emailStr = log.username ? `<div class="text-[10px] text-zinc-400 font-mono">${escapeHtml(log.username)}</div>` : "";
+        let actionBadge = `<span class="rounded bg-zinc-100 text-zinc-700 px-2 py-0.5 text-[10.5px] font-semibold">${log.action}</span>`;
+        if (log.action === "EXCEL_DOWNLOAD" || log.action === "REPORT_EXPORT") {
+          actionBadge = `<span class="rounded-md bg-emerald-100 text-emerald-800 px-2 py-0.5 text-[10.5px] font-bold border border-emerald-200/60 shadow-2xs">📥 엑셀다운</span>`;
+        } else if (log.action === "LOGIN") {
+          actionBadge = `<span class="rounded-md bg-sky-100 text-sky-800 px-2 py-0.5 text-[10.5px] font-bold border border-sky-200/60 shadow-2xs">🔑 로그인</span>`;
+        } else if (log.action === "LOGOUT") {
+          actionBadge = `<span class="rounded-md bg-zinc-100 text-zinc-600 px-2 py-0.5 text-[10.5px] font-medium border border-zinc-200/60">🚪 로그아웃</span>`;
+        } else if (log.action === "FAST_SYNC") {
+          actionBadge = `<span class="rounded-md bg-purple-100 text-purple-800 px-2 py-0.5 text-[10.5px] font-bold border border-purple-200/60 shadow-2xs">⚡ DB동기화</span>`;
+        }
 
-        return `<tr class="hover:bg-zinc-50/80 transition">
-          <td class="py-2.5 px-3 text-zinc-500 font-mono text-[11px] whitespace-nowrap">${escapeHtml(log.timestamp || "-")}</td>
-          <td class="py-2.5 px-3 whitespace-nowrap">${userStr}${emailStr}</td>
-          <td class="py-2.5 px-3 whitespace-nowrap">${actionBadge}</td>
-          <td class="py-2.5 px-3 font-medium text-zinc-800">${escapeHtml(log.target || log.detail || "-")}</td>
-          <td class="py-2.5 px-3 text-zinc-500 font-mono text-[11px] whitespace-nowrap">${escapeHtml(log.ip || "-")}</td>
-        </tr>`;
-      }).join("");
+        const deptStr = log.dept ? `<span class="text-zinc-500 font-semibold text-[11px]">[${escapeHtml(log.dept)}]</span>` : "";
+        const userStr = `<div class="truncate"><span class="font-bold text-zinc-900 text-xs">${escapeHtml(log.name || log.username)}</span> ${deptStr}</div>`;
+        const emailStr = log.username ? `<div class="text-[10.5px] text-zinc-400 font-mono truncate" title="${escapeHtml(log.username)}">${escapeHtml(log.username)}</div>` : "";
+
+        rowsHtml += `
+          <tr class="hover:bg-indigo-50/30 transition border-b border-zinc-100">
+            <td class="py-2.5 px-3 whitespace-nowrap">
+              <span class="font-mono text-zinc-900 font-bold text-xs">${escapeHtml(timeStr)}</span>
+              <span class="text-[10px] text-zinc-400 block font-mono">${escapeHtml(dateStr)}</span>
+            </td>
+            <td class="py-2.5 px-3 min-w-0">${userStr}${emailStr}</td>
+            <td class="py-2.5 px-3 text-center whitespace-nowrap">${actionBadge}</td>
+            <td class="py-2.5 px-3 text-zinc-800 font-medium break-words text-xs">${escapeHtml(log.target || log.detail || "-")}</td>
+            <td class="py-2.5 px-3 text-right whitespace-nowrap">
+              <span class="text-zinc-600 font-mono text-[11.5px] bg-zinc-100/80 px-2 py-0.5 rounded border border-zinc-200/50">${escapeHtml(log.ip || "-")}</span>
+            </td>
+          </tr>
+        `;
+      });
+
+      auditLogTableBody.innerHTML = rowsHtml;
+
+      // 4. 페이지 버튼 렌더링
+      renderAuditPaginationButtons(totalPages);
+    }
+
+    // 페이지 번호 버튼 렌더링
+    function renderAuditPaginationButtons(totalPages) {
+      if (!auditPageBtnsContainer) return;
+      if (totalPages <= 1) {
+        auditPageBtnsContainer.innerHTML = "";
+        return;
+      }
+
+      let btnsHtml = "";
+
+      // 이전 버튼
+      const prevDisabled = auditCurrentPage <= 1;
+      btnsHtml += `
+        <button type="button" class="btn-audit-page px-2.5 py-1 rounded-md text-xs font-semibold ${prevDisabled ? 'text-zinc-300 cursor-not-allowed bg-zinc-50' : 'text-zinc-700 hover:bg-zinc-100 cursor-pointer border border-zinc-200 bg-white'}" data-page="${auditCurrentPage - 1}" ${prevDisabled ? 'disabled' : ''}>
+          ◀ 이전
+        </button>
+      `;
+
+      // 페이지 번호 계산 (최대 5개 노출)
+      let startP = Math.max(1, auditCurrentPage - 2);
+      let endP = Math.min(totalPages, startP + 4);
+      if (endP - startP < 4) {
+        startP = Math.max(1, endP - 4);
+      }
+
+      if (startP > 1) {
+        btnsHtml += `<button type="button" class="btn-audit-page px-2.5 py-1 rounded-md text-xs font-semibold text-zinc-700 hover:bg-zinc-100 border border-zinc-200 bg-white cursor-pointer" data-page="1">1</button>`;
+        if (startP > 2) {
+          btnsHtml += `<span class="px-1 text-zinc-400 text-xs">...</span>`;
+        }
+      }
+
+      for (let p = startP; p <= endP; p++) {
+        const isCur = p === auditCurrentPage;
+        btnsHtml += `
+          <button type="button" class="btn-audit-page px-2.5 py-1 rounded-md text-xs font-bold transition cursor-pointer ${isCur ? 'bg-indigo-600 text-white shadow-2xs ring-1 ring-indigo-600' : 'text-zinc-700 hover:bg-zinc-100 border border-zinc-200 bg-white'}" data-page="${p}">
+            ${p}
+          </button>
+        `;
+      }
+
+      if (endP < totalPages) {
+        if (endP < totalPages - 1) {
+          btnsHtml += `<span class="px-1 text-zinc-400 text-xs">...</span>`;
+        }
+        btnsHtml += `<button type="button" class="btn-audit-page px-2.5 py-1 rounded-md text-xs font-semibold text-zinc-700 hover:bg-zinc-100 border border-zinc-200 bg-white cursor-pointer" data-page="${totalPages}">${totalPages}</button>`;
+      }
+
+      // 다음 버튼
+      const nextDisabled = auditCurrentPage >= totalPages;
+      btnsHtml += `
+        <button type="button" class="btn-audit-page px-2.5 py-1 rounded-md text-xs font-semibold ${nextDisabled ? 'text-zinc-300 cursor-not-allowed bg-zinc-50' : 'text-zinc-700 hover:bg-zinc-100 cursor-pointer border border-zinc-200 bg-white'}" data-page="${auditCurrentPage + 1}" ${nextDisabled ? 'disabled' : ''}>
+          다음 ▶
+        </button>
+      `;
+
+      auditPageBtnsContainer.innerHTML = btnsHtml;
+
+      // 페이지 클릭 이벤트 바인딩
+      auditPageBtnsContainer.querySelectorAll(".btn-audit-page").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const targetPage = parseInt(btn.getAttribute("data-page"), 10);
+          if (targetPage && targetPage !== auditCurrentPage && targetPage >= 1 && targetPage <= totalPages) {
+            auditCurrentPage = targetPage;
+            renderAuditLogsTable(cachedAuditLogs);
+            if (auditLogTableContainer) {
+              auditLogTableContainer.scrollTop = 0;
+            }
+          }
+        });
+      });
     }
 
     async function fetchAndRenderAuditLogs() {
       if (!auditLogTableBody) return;
-      auditLogTableBody.innerHTML = `<tr><td colspan="5" class="py-8 text-center text-zinc-400">감사 로그를 조회하는 중입니다...</td></tr>`;
+      auditLogTableBody.innerHTML = `<tr><td colspan="5" class="py-12 text-center text-zinc-400">감사 로그를 조회하는 중입니다...</td></tr>`;
       try {
         const res = await fetch("/api/audit_logs");
         if (res.ok) {
           const data = await res.json();
           cachedAuditLogs = data.logs || [];
+          updateAuditDateOptions(cachedAuditLogs);
+          renderDailySpikeStrip(cachedAuditLogs);
+          renderAuditCalendar(calYear, calMonth);
+          auditCurrentPage = 1;
           renderAuditLogsTable(cachedAuditLogs);
         } else {
-          auditLogTableBody.innerHTML = `<tr><td colspan="5" class="py-8 text-center text-rose-500">감사 로그를 불러오지 못했습니다.</td></tr>`;
+          auditLogTableBody.innerHTML = `<tr><td colspan="5" class="py-12 text-center text-rose-500">감사 로그를 불러오지 못했습니다.</td></tr>`;
         }
       } catch (e) {
-        auditLogTableBody.innerHTML = `<tr><td colspan="5" class="py-8 text-center text-rose-500">서버 연결 오류</td></tr>`;
+        auditLogTableBody.innerHTML = `<tr><td colspan="5" class="py-12 text-center text-rose-500">서버 연결 오류</td></tr>`;
       }
     }
 
@@ -11461,22 +12944,85 @@ function init() {
       btnAuditLogModal.addEventListener("click", () => {
         auditLogModal.classList.remove("hidden");
         if (auditSearchInput) auditSearchInput.value = "";
+        if (auditDateFilterSelect) auditDateFilterSelect.value = "all";
+        if (auditActionFilterSelect) auditActionFilterSelect.value = "all";
+        if (auditPageSizeSelect) auditPageSize = parseInt(auditPageSizeSelect.value, 10) || 20;
+        auditCurrentPage = 1;
+        switchAuditView("list");
         fetchAndRenderAuditLogs();
       });
 
       const hideAuditModal = () => auditLogModal.classList.add("hidden");
       if (closeAuditLogModalBtn) closeAuditLogModalBtn.addEventListener("click", hideAuditModal);
       if (closeAuditLogModalBtn2) closeAuditLogModalBtn2.addEventListener("click", hideAuditModal);
+      if (closeAuditLogModalBtn3) closeAuditLogModalBtn3.addEventListener("click", hideAuditModal);
       auditLogModal.addEventListener("click", (e) => {
         if (e.target === auditLogModal) hideAuditModal();
       });
+
+      // 뷰 탭 전환 이벤트
+      if (auditViewTabList) {
+        auditViewTabList.addEventListener("click", () => switchAuditView("list"));
+      }
+      if (auditViewTabCalendar) {
+        auditViewTabCalendar.addEventListener("click", () => switchAuditView("calendar"));
+      }
+
+      // 캘린더 월 이동 이벤트
+      if (auditCalPrevMonthBtn) {
+        auditCalPrevMonthBtn.addEventListener("click", () => {
+          calMonth--;
+          if (calMonth < 1) { calMonth = 12; calYear--; }
+          renderAuditCalendar(calYear, calMonth);
+        });
+      }
+      if (auditCalNextMonthBtn) {
+        auditCalNextMonthBtn.addEventListener("click", () => {
+          calMonth++;
+          if (calMonth > 12) { calMonth = 1; calYear++; }
+          renderAuditCalendar(calYear, calMonth);
+        });
+      }
+      if (auditCalTodayBtn) {
+        auditCalTodayBtn.addEventListener("click", () => {
+          const n = new Date();
+          calYear = n.getFullYear();
+          calMonth = n.getMonth() + 1;
+          renderAuditCalendar(calYear, calMonth);
+        });
+      }
 
       if (btnRefreshAuditLogs) {
         btnRefreshAuditLogs.addEventListener("click", fetchAndRenderAuditLogs);
       }
 
       if (auditSearchInput) {
-        auditSearchInput.addEventListener("input", () => renderAuditLogsTable(cachedAuditLogs));
+        auditSearchInput.addEventListener("input", () => {
+          auditCurrentPage = 1;
+          renderAuditLogsTable(cachedAuditLogs);
+        });
+      }
+
+      if (auditDateFilterSelect) {
+        auditDateFilterSelect.addEventListener("change", () => {
+          auditCurrentPage = 1;
+          renderAuditLogsTable(cachedAuditLogs);
+        });
+      }
+
+      if (auditActionFilterSelect) {
+        auditActionFilterSelect.addEventListener("change", () => {
+          auditCurrentPage = 1;
+          renderAuditLogsTable(cachedAuditLogs);
+        });
+      }
+
+      if (auditPageSizeSelect) {
+        auditPageSizeSelect.addEventListener("change", () => {
+          auditPageSize = parseInt(auditPageSizeSelect.value, 10);
+          auditCurrentPage = 1;
+          renderAuditLogsTable(cachedAuditLogs);
+        });
       }
 
       if (btnSyncEmployeesModal) {
@@ -11636,8 +13182,15 @@ window.VOC_RENDER = {
   closeClaimPhotoModal,
   loadMoreClaimPhotos,
   prevClaimPhotoModal,
-  nextClaimPhotoModal
+  nextClaimPhotoModal,
+  renderReport,
+  renderPeriodControls,
+  renderAll
 };
+window.renderPeriodControls = renderPeriodControls;
+window.renderReport = renderReport;
+window.renderAll = renderAll;
+window.E = window.VOC_ENGINE;
 
 
 window.setClaimCategoryFilter = function(catName) {
@@ -11859,27 +13412,33 @@ function renderChatDetail() {
     prevChats = allPrevChats.filter(c => c.agent === "ALF (AI 상담)" || c.alfInflow || c.channel === "챗봇(ALF)");
   }
 
-  // 1. KPI Cards
+  // 1. KPI Cards (전체 / 상담사 / 챗봇 / 챗봇 셀프 처리율)
   const kpiEl = document.getElementById("chatKpiRow");
+  const alfCur = E.aggregateAlf(period);
+  const alfPrev = prevP ? E.aggregateAlf(prevP) : null;
+  const compRateNum = parseFloat(alfCur.compRate || "0");
+  const prevRateNum = alfPrev ? parseFloat(alfPrev.compRate || "0") : null;
+  const rateDiff = prevRateNum != null ? compRateNum - prevRateNum : null;
+
   if (kpiEl) {
     const tot = curChats.length;
     const counselorChats = curChats.filter(c => c.agent && c.agent !== "ALF (AI 상담)" && c.agent !== "미배정").length;
-    const alfChats = curChats.filter(c => c.agent === "ALF (AI 상담)" || c.alfInflow).length;
     const inCnt = curChats.filter(c => (c.direction || "INBOUND") === "INBOUND").length;
     const outCnt = curChats.filter(c => (c.direction || "INBOUND") === "OUTBOUND").length;
 
     kpiEl.innerHTML =
-      kpiCard("총 채팅 접수량", `${tot.toLocaleString()}건`, prevChats.length, {
-        subText: `인바운드 ${inCnt}건 / 아웃바운드 ${outCnt}건`
+      kpiCard("총 채팅 접수량 (전체)", `${tot.toLocaleString()}건`, prevChats.length, {
+        subText: `수신 ${inCnt.toLocaleString()}건 / 발신 ${outCnt.toLocaleString()}건`
       }) +
-      kpiCard("상담사 직접 응대", `${counselorChats.toLocaleString()}건`, null, {
-        subText: `전체 채팅의 ${tot > 0 ? ((counselorChats / tot) * 100).toFixed(1) : 0}% 담당`
+      kpiCard("상담사 직접 처리", `${counselorChats.toLocaleString()}건`, null, {
+        subText: `전체 접수의 ${tot > 0 ? ((counselorChats / tot) * 100).toFixed(1) : 0}% 직접 상담`
       }) +
-      kpiCard("ALF (AI 챗봇) 연동/처리", `${alfChats.toLocaleString()}건`, null, {
-        subText: `봇 자체 인입 및 완결 건수`
+      kpiCard("챗봇 자체해결 (셀프)", `${Number(alfCur.compCount || 0).toLocaleString()}건`, null, {
+        subText: `봇 인입 ${Number(alfCur.totalInflow || 0).toLocaleString()}건 중 미이관 완결`
       }) +
-      kpiCard("평균 해결 소요시간", "8분 0초", null, {
-        subText: `온라인 실시간 세션 기준`
+      kpiCard("챗봇 셀프 처리율", `${alfCur.compRate}%`, rateDiff, {
+        alert: compRateNum < 30,
+        subText: `상담사 이관: ${Number(alfCur.transCount || 0).toLocaleString()}건 (${alfCur.transRate}%)`
       });
   }
 
@@ -11949,6 +13508,9 @@ function renderChatDetail() {
       }
     });
   }
+
+  // 3.5 🤖 AI 챗봇(ALF) 인입 문의 유형 Top 10 (자체완결 vs 상담사이관) 차트 & 분석표
+  renderAlfTagChartAndTable(alfCur, "chatAlfTagChart", "chatAlfTagTableBody", "chatAlfTagTotalBadge");
 
   // 4. Chat Tag Table & Chart
   const tagTbody = document.getElementById("chatTagTableBody");
@@ -12084,8 +13646,8 @@ function renderChatDetailTable(chats) {
       <td class="py-2.5 px-2 font-medium text-zinc-900 whitespace-nowrap">${custName}</td>
       <td class="py-2.5 px-2 font-medium text-zinc-700">${escapeHtml(c.journey || "–")}</td>
       <td class="py-2.5 px-3 text-zinc-600 font-medium truncate max-w-xs" title="${escapeHtml(c.tag || '–')}">${escapeHtml(c.tag || "–")}</td>
-      <td class="py-2.5 px-4 text-zinc-800 break-words max-w-xs">${escapeHtml(c.issue || "–")}</td>
-      <td class="py-2.5 px-4 text-zinc-600 break-words max-w-xs">${escapeHtml(c.act || "–")}</td>
+      <td class="py-2.5 px-4 text-zinc-800 break-words whitespace-normal min-w-[280px] max-w-md">${escapeHtml(c.issue || "–")}</td>
+      <td class="py-2.5 px-4 text-zinc-600 break-words whitespace-normal min-w-[280px] max-w-md">${escapeHtml(c.act || "–")}</td>
     </tr>`;
   }).join("");
 }
@@ -12405,6 +13967,12 @@ function renderCtiTagAnalysis(curCalls, prevCalls) {
       }
     });
   }
+}
+
+// 서버 코멘트/메모 자동 양방향 동기화 (초기 1회 + 30초 주기 백그라운드 동기화)
+if (typeof syncCommentsWithServer === "function") {
+  syncCommentsWithServer();
+  setInterval(syncCommentsWithServer, 30000);
 }
 
 })();

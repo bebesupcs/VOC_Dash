@@ -101,9 +101,31 @@
     "6a671378bd21c53e1f0e",
     "6a695e21d4de8117019d",
     "6a69651ac276afa26082",
-    "6a570058b7a9e5ffb5ab"
+    "6a570058b7a9e5ffb5ab",
+    "6abd2599b11919f532e0",
+    "6abdbef7afb2683a7191",
+    "6ac5ad043dd8dbc0a8ab",
+    "6ac60458602bbcf491bf",
+    "6ac7359badf05fa7f039",
+    "6acc3704c063e596b16a",
+    "6acd8a1e71c40253c0ba",
+    "6aced5550c9c2af7bdd2",
+    "6ad03fa41baade3bbcc9",
+    "6ad065df2efea25b17e2",
+    "6ad1d0d7d0ca1daeb18d",
+    "6ad9b4bf072edf24d243",
+    "6adaf4262246348cd3d0",
+    "6ae04372b1262bea8ddf",
+    "6abe0525db1da0196c72",
+    "6ac1994bb51cea0d6132",
+    "6ac75cbeafb194dab888",
+    "6acc4351ed8f7f508aa1",
+    "6ad56ae52efbaa636196",
+    "6ae1719b82cfd7d7caa0",
+    "6af26cd1e8fc678852b6"
   ],
   "manual_additions": [],
+  "included_ids": [],
   "excluded_reasons": {
     "6abb7df40cae96ba50e9": {
       "reason": "단순답변",
@@ -512,6 +534,90 @@
     "6a570058b7a9e5ffb5ab": {
       "reason": "제외",
       "date": "2026-10-28"
+    },
+    "6abd2599b11919f532e0": {
+      "reason": "제외",
+      "date": "2026-11-12"
+    },
+    "6abdbef7afb2683a7191": {
+      "reason": "제외",
+      "date": "2026-11-12"
+    },
+    "6ac5ad043dd8dbc0a8ab": {
+      "reason": "제외",
+      "date": "2026-11-12"
+    },
+    "6ac60458602bbcf491bf": {
+      "reason": "제외",
+      "date": "2026-11-12"
+    },
+    "6ac7359badf05fa7f039": {
+      "reason": "제외",
+      "date": "2026-11-12"
+    },
+    "6acc3704c063e596b16a": {
+      "reason": "제외",
+      "date": "2026-11-12"
+    },
+    "6acd8a1e71c40253c0ba": {
+      "reason": "제외",
+      "date": "2026-11-12"
+    },
+    "6aced5550c9c2af7bdd2": {
+      "reason": "제외",
+      "date": "2026-11-12"
+    },
+    "6ad03fa41baade3bbcc9": {
+      "reason": "제외",
+      "date": "2026-11-12"
+    },
+    "6ad065df2efea25b17e2": {
+      "reason": "제외",
+      "date": "2026-11-12"
+    },
+    "6ad1d0d7d0ca1daeb18d": {
+      "reason": "제외",
+      "date": "2026-11-12"
+    },
+    "6ad9b4bf072edf24d243": {
+      "reason": "제외",
+      "date": "2026-11-12"
+    },
+    "6adaf4262246348cd3d0": {
+      "reason": "제외",
+      "date": "2026-11-12"
+    },
+    "6ae04372b1262bea8ddf": {
+      "reason": "제외",
+      "date": "2026-11-12"
+    },
+    "6abe0525db1da0196c72": {
+      "reason": "제외",
+      "date": "2026-11-12"
+    },
+    "6ac1994bb51cea0d6132": {
+      "reason": "제외",
+      "date": "2026-11-12"
+    },
+    "6ac75cbeafb194dab888": {
+      "reason": "제외",
+      "date": "2026-11-12"
+    },
+    "6acc4351ed8f7f508aa1": {
+      "reason": "제외",
+      "date": "2026-11-12"
+    },
+    "6ad56ae52efbaa636196": {
+      "reason": "제외",
+      "date": "2026-11-12"
+    },
+    "6ae1719b82cfd7d7caa0": {
+      "reason": "제외",
+      "date": "2026-11-12"
+    },
+    "6af26cd1e8fc678852b6": {
+      "reason": "제외건",
+      "date": "2026-11-13"
     }
   }
 }

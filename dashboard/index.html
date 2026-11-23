@@ -1,24 +1,56 @@
 <!doctype html>
 
-
-
 <html lang="ko">
-
-
 
 <head>
 
-
-
 <meta charset="utf-8" />
-
-
 
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-
-
 <title>베베숲 VOC 대시보드</title>
+
+<!-- [초기 로딩 FOUC 방지 및 세션 유효성 검사] -->
+<script>
+  (function() {
+    try {
+      var urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get("print") === "true") {
+        document.documentElement.classList.add("is-authenticated");
+        document.documentElement.classList.add("is-print-mode");
+        return;
+      }
+      var stored = localStorage.getItem("voc_auth_user") || sessionStorage.getItem("voc_auth_user");
+      if (stored) {
+        var u = JSON.parse(stored);
+        var now = Date.now();
+        var MAX_SESSION = 7 * 24 * 60 * 60 * 1000; // 최대 세션 유지 7일
+        var INACTIVITY_LIMIT = 24 * 60 * 60 * 1000; // 연속 미활동 24시간 제한
+        var isExpired = false;
+        if (u && u.loginAt && (now - u.loginAt > MAX_SESSION)) {
+          isExpired = true;
+        } else if (u && u.lastActive && (now - u.lastActive > INACTIVITY_LIMIT)) {
+          isExpired = true;
+        }
+        if (isExpired) {
+          localStorage.removeItem("voc_auth_user");
+          sessionStorage.removeItem("voc_auth_user");
+        } else if (u && (u.username || u.email || u.id)) {
+          document.documentElement.classList.add("is-authenticated");
+        }
+      }
+    } catch(e) {}
+  })();
+</script>
+
+<style>
+  /* 인증 상태에 따른 화면 노출 제어 */
+  html.is-authenticated #authLoginPage { display: none !important; }
+  html.is-authenticated #dashboardApp { display: flex !important; }
+
+  html:not(.is-authenticated) #authLoginPage { display: flex !important; }
+  html:not(.is-authenticated) #dashboardApp { display: none !important; }
+</style>
 
 
 
@@ -35,8 +67,8 @@
 
 
 <script src="exceljs.min.js"></script>
-
-
+<script src="html2canvas.min.js"></script>
+<script src="jspdf.umd.min.js"></script>
 
 <link rel="preconnect" href="https://rsms.me/" />
 
@@ -62,17 +94,33 @@
   .overflow-x-auto {
     -webkit-overflow-scrolling: touch;
   }
-  /* 모바일 테이블 줄바꿈 찌그러짐 방지: 셀 너비 유지 및 매끄러운 터치 스크롤 */
+  /* 테이블 셀 줄바꿈 및 너비 보장: 텍스트 겹침 방지 */
   .overflow-x-auto table:not(.wrap-table) th,
   .overflow-x-auto table:not(.wrap-table) td {
     white-space: nowrap;
   }
   .overflow-x-auto table td.wrap-cell,
-  .overflow-x-auto table td.whitespace-normal {
+  .overflow-x-auto table td.whitespace-normal,
+  .overflow-x-auto table td.break-words,
+  .overflow-x-auto table th.break-words,
+  .overflow-x-auto table td.cell-wrap {
     white-space: normal !important;
+    word-break: break-word !important;
+    overflow-wrap: break-word !important;
   }
   section:empty {
     display: none !important;
+  }
+
+  /* 리포트 화면 및 PDF 추출 시 글자 떨어짐/줄바꿈 원천 방지 */
+  #reportView {
+    word-break: keep-all;
+  }
+  #reportView h2,
+  #reportView h3,
+  #reportView th,
+  #reportView td {
+    word-break: keep-all;
   }
 
 
@@ -234,30 +282,169 @@
 
 
 
+  /* ============================================================
+     [PDF / 인쇄 전용 스타일: 웹 화면 100% 동일 미려한 벡터 PDF 렌더링 (1-Page Executive Fit)]
+     ============================================================ */
   @media print {
-
-
-
-    body { background: #fff; }
-
-
-
-    aside, #appSidebar, #dashboardView, #reportPrint { display: none !important; }
-
-
-
-    main { padding: 0 !important; }
-
-
-
-    #reportView article { box-shadow: none; --tw-ring-shadow: 0 0 #0000; max-width: none; padding: 0; }
-
-
-
-    #reportView canvas { max-height: 320px; }
-
-
-
+    @page {
+      size: A4 portrait;
+      margin: 4mm 6mm 4mm 6mm;
+    }
+    html, body {
+      background: #fff !important;
+      font-size: 11px !important;
+      line-height: 1.35 !important;
+      width: 100% !important;
+      height: auto !important;
+      overflow: visible !important;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    aside, #appSidebar, #dashboardView, #qualityView, #deliveryView, #serviceView, #channelView, #compensationView, #reportPrint, #reportExportExcel, #reportExportPdf, .is-print-hidden, main > p.text-center, #authLoginPage, header, #periodControls, #openSidebarBtn, #mobileActiveTabBadge {
+      display: none !important;
+    }
+    main {
+      padding: 0 !important;
+      margin: 0 !important;
+      width: 100% !important;
+    }
+    #reportView {
+      display: block !important;
+      width: 100% !important;
+      margin: 0 !important;
+      padding: 0 !important;
+    }
+    #reportView article {
+      box-shadow: none !important;
+      border: none !important;
+      max-width: 100% !important;
+      width: 100% !important;
+      padding: 0 !important;
+      margin: 0 auto !important;
+      zoom: 1 !important; /* zoom 제거: 캔버스 잘림 및 글자 찌그러짐 원천 차단 */
+    }
+    /* 여백 및 컴팩트 마진 */
+    #reportView section {
+      margin-top: 8px !important;
+      break-inside: avoid !important;
+      page-break-inside: avoid !important;
+    }
+    #reportView h2 {
+      font-size: 16px !important;
+      margin-bottom: 3px !important;
+    }
+    #reportView h3 {
+      font-size: 12px !important;
+      margin-bottom: 4px !important;
+    }
+    /* 1. VOC 요약 (4개 카드) */
+    #reportKpi {
+      display: grid !important;
+      grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+      gap: 8px !important;
+      margin-top: 4px !important;
+    }
+    #reportKpi > div {
+      padding: 7px 10px !important;
+    }
+    #reportKpi .text-2xl {
+      font-size: 20px !important;
+      line-height: 1.15 !important;
+    }
+    /* 2. 채널별 추이 차트: 우측 끝 잘림 없이 100% 온전한 너비 확보 */
+    #reportChannelChart,
+    #reportView canvas {
+      width: 100% !important;
+      max-width: 100% !important;
+      box-sizing: border-box !important;
+      display: block !important;
+    }
+    #reportChannelChart {
+      max-height: 130px !important;
+      height: 130px !important;
+    }
+    #reportView .rounded-lg.ring-1.ring-black\/5.p-4 {
+      padding: 8px 10px !important;
+      margin-top: 4px !important;
+    }
+    /* 2.5 AI 챗봇 응대 현황 (4개 카드) */
+    #reportAiAlfInsightSection {
+      margin-top: 8px !important;
+      padding: 0 !important;
+      background: none !important;
+      box-shadow: none !important;
+    }
+    #reportAlfKpiGrid {
+      display: grid !important;
+      grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+      gap: 8px !important;
+      margin-top: 4px !important;
+    }
+    #reportAlfKpiGrid > div {
+      padding: 7px 10px !important;
+    }
+    #reportAlfKpiGrid .text-2xl {
+      font-size: 18px !important;
+      line-height: 1.15 !important;
+    }
+    /* 3. 부문별 클레임 현황 (3개 카드): 미니 차트 높이와 테이블 폰트 완벽 복원 */
+    #reportThreePillarsSection {
+      break-before: avoid !important;
+      page-break-before: avoid !important;
+      margin-top: 8px !important;
+      padding-top: 0 !important;
+    }
+    #reportThreePillars {
+      display: grid !important;
+      grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+      gap: 8px !important;
+      margin-top: 4px !important;
+    }
+    #reportThreePillars .flex.flex-col {
+      padding: 8px 10px !important;
+      break-inside: avoid !important;
+      page-break-inside: avoid !important;
+    }
+    #reportThreePillars .h-28 {
+      height: 80px !important;
+      padding: 4px !important;
+    }
+    #reportThreePillars canvas {
+      max-height: 74px !important;
+      height: 74px !important;
+    }
+    #reportThreePillars table {
+      font-size: 11px !important;
+    }
+    #reportThreePillars table th {
+      padding: 3px 4px !important;
+    }
+    #reportThreePillars table td {
+      padding: 3px 4px !important;
+    }
+    #reportThreePillars table span[class*="text-[9.5px]"] {
+      font-size: 9.5px !important;
+      padding: 1.5px 4px !important;
+      line-height: 1.2 !important;
+    }
+    #reportThreePillars .space-y-2\.5 {
+      gap: 4px !important;
+    }
+    #reportThreePillars .space-y-2\.5 > div {
+      padding: 6px 8px !important;
+      font-size: 10.5px !important;
+    }
+    #reportThreePillars .space-y-2\.5 p {
+      font-size: 10px !important;
+      line-height: 1.4 !important;
+    }
+    .pillar-card {
+      break-inside: avoid !important;
+      page-break-inside: avoid !important;
+    }
+    #reportView article > p.hidden.print\:block {
+      display: none !important;
+    }
   }
 
 
@@ -271,78 +458,86 @@
 
 
   html.is-authenticated #authLoginPage { display: none !important; }
-
-
-
   html.is-authenticated #dashboardApp { display: flex !important; }
 
-
-
+  /* Headless PDF 인쇄 모드 전용 스타일 */
+  html.is-print-mode #appSidebar,
+  html.is-print-mode #authLoginPage,
+  html.is-print-mode #reportExportExcel,
+  html.is-print-mode #reportExportPdf,
+  html.is-print-mode #reportPrint,
+  html.is-print-mode .group\/tip,
+  html.is-print-mode label[title*="토글"],
+  html.is-print-mode header,
+  html.is-print-mode #periodControls,
+  html.is-print-mode #openSidebarBtn,
+  html.is-print-mode .is-print-hidden,
+  html.is-print-mode #mobileActiveTabBadge {
+    display: none !important;
+  }
+  html.is-print-mode #dashboardApp {
+    display: block !important;
+  }
+  html.is-print-mode main {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  html.is-print-mode #dashboardView,
+  html.is-print-mode #qualityView,
+  html.is-print-mode #deliveryView,
+  html.is-print-mode #serviceView,
+  html.is-print-mode #channelView,
+  html.is-print-mode #compensationView {
+    display: none !important;
+  }
+  html.is-print-mode #reportView {
+    display: block !important;
+  }
+  html.is-print-mode #reportKpi {
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+  }
+  html.is-print-mode #reportThreePillarsSection {
+    break-before: avoid !important;
+    page-break-before: avoid !important;
+    margin-top: 6px !important;
+    padding-top: 0 !important;
+  }
+  html.is-print-mode #reportThreePillars {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 12px !important;
+    margin-top: 8px !important;
+  }
+  html.is-print-mode #reportThreePillars .flex.flex-col {
+    padding: 6px 8px !important;
+  }
+  html.is-print-mode #reportThreePillars canvas {
+    max-height: 85px !important;
+  }
+  html.is-print-mode #reportThreePillars table td {
+    padding-top: 2px !important;
+    padding-bottom: 2px !important;
+  }
+  html.is-print-mode .pillar-card {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+  html.is-print-mode main > p.text-center {
+    display: none !important;
+  }
+  html.is-print-mode #reportView article {
+    box-shadow: none !important;
+    border: none !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    max-width: 100% !important;
+  }
 </style>
 
-
-
-<script>
-
-
-
-  // [초기 로딩 FOUC 원천 방지 및 4시간 무반응 세션 만료 검사]
-
-
-
-  (function() {
-
-
-
-    try {
-
-
-
-      var stored = localStorage.getItem("voc_auth_user") || sessionStorage.getItem("voc_auth_user");
-
-
-
-      if (stored) {
-
-
-
-        var u = JSON.parse(stored);
-
-
-
-        var now = Date.now();
-        var MAX_SESSION = 9 * 60 * 60 * 1000; // 최대 세션 유지 9시간 (8~10시간)
-        var INACTIVITY_LIMIT = 4 * 60 * 60 * 1000; // 연속 미활동 4시간 제한
-
-        var isExpired = false;
-        if (u && u.loginAt && (now - u.loginAt > MAX_SESSION)) {
-          isExpired = true;
-        } else if (u && u.lastActive && (now - u.lastActive > INACTIVITY_LIMIT)) {
-          isExpired = true;
-        }
-
-        if (isExpired) {
-          localStorage.removeItem("voc_auth_user");
-          sessionStorage.removeItem("voc_auth_user");
-        } else if (u && (u.username || u.email || u.id)) {
-          document.documentElement.classList.add("is-authenticated");
-        }
-
-
-
-      }
-
-
-
-    } catch(e) {}
-
-
-
-  })();
-
-
-
-</script>
 
 
 
@@ -553,13 +748,13 @@
 
 
 
-<div id="dashboardApp" class="min-h-screen flex flex-col lg:flex-row w-full max-w-full overflow-x-hidden" style="display: none;">
+<div id="dashboardApp" class="min-h-screen flex flex-col lg:flex-row w-full max-w-full overflow-x-hidden">
 
   <!-- 모바일 사이드바 배경 (Backdrop) -->
   <div id="sidebarBackdrop" class="fixed inset-0 bg-black/50 backdrop-blur-xs z-40 lg:hidden hidden transition-opacity"></div>
 
-  <!-- 좌측 사이드바: 1~6번 카테고리 및 기간 설정 (모바일/태블릿: 슬라이드 드로어) -->
-  <aside id="appSidebar" class="fixed inset-y-0 left-0 z-50 w-72 sm:w-80 bg-white shadow-2xl transition-transform duration-300 ease-in-out -translate-x-full lg:translate-x-0 lg:static lg:w-64 shrink-0 border-r border-black/10 p-4 lg:p-5 flex flex-col justify-between h-full lg:h-screen lg:sticky lg:top-0 lg:shadow-none overflow-y-auto">
+  <!-- 좌측 사이드바: 1~6번 카테고리 및 기간 설정 (고정 사이드바 / 모바일: 슬라이드 드로어) -->
+  <aside id="appSidebar" class="fixed inset-y-0 left-0 z-40 w-72 sm:w-80 lg:w-64 bg-white shadow-2xl lg:shadow-none transition-transform duration-300 ease-in-out -translate-x-full lg:translate-x-0 shrink-0 border-r border-black/10 p-4 lg:p-5 flex flex-col justify-between h-screen overflow-y-auto">
 
 
 
@@ -698,52 +893,27 @@
 
 
         <div class="mt-2 flex items-center justify-between gap-1">
-
-
-
           <button id="prevBtn" class="shrink-0 rounded-lg p-1.5 text-xs text-zinc-600 hover:bg-white hover:shadow-sm ring-1 ring-black/10 transition cursor-pointer" title="이전 기간 (과거로 이동)">◀</button>
-
-
-
           <div class="relative flex-1 min-w-0">
-
-
-
             <select id="periodSelect" class="w-full appearance-none rounded-lg bg-white py-1.5 pl-2 pr-5 text-xs font-bold text-zinc-800 ring-1 ring-black/10 hover:ring-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-600 cursor-pointer text-center truncate tnum transition shadow-2xs">
-
-
-
             </select>
-
-
-
             <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-1.5 text-zinc-400 text-[10px]">▼</div>
-
-
-
             <span id="periodLabel" class="hidden"></span>
-
-
-
           </div>
-
-
-
           <button id="nextBtn" class="shrink-0 rounded-lg p-1.5 text-xs text-zinc-600 hover:bg-white hover:shadow-sm ring-1 ring-black/10 transition cursor-pointer" title="다음 기간 (최신으로 이동)">▶</button>
-
-
-
         </div>
 
-
-
-      </div>
-
-
-
-
-
-
+        <!-- 사이드바 상단: 부재 포함 [ OFF | ON ] 토글 -->
+        <div class="mt-2.5 flex items-center justify-between rounded-xl bg-zinc-100/90 px-3 py-1.5 ring-1 ring-black/5 text-[11px] whitespace-nowrap">
+          <div class="flex items-center gap-1.5 min-w-0">
+            <span class="font-bold text-zinc-700 whitespace-nowrap">부재 포함</span>
+            <span id="sidebarCallCountBadge" class="font-mono text-[10px] text-zinc-500 font-semibold whitespace-nowrap">(93건)</span>
+          </div>
+          <div class="inline-flex rounded-lg bg-zinc-200/80 p-0.5 shrink-0" role="group" aria-label="부재 포함 선택">
+            <button id="btnSideModeOff" type="button" class="rounded px-2.5 py-0.5 text-[11px] font-bold transition cursor-pointer bg-white text-zinc-900 shadow-2xs whitespace-nowrap" title="순수 실통화만 카운트 (기본값)">OFF</button>
+            <button id="btnSideModeOn" type="button" class="rounded px-2.5 py-0.5 text-[11px] font-bold transition cursor-pointer text-zinc-500 hover:text-zinc-800 whitespace-nowrap" title="채널톡 공식 전화 수 (부재/미연결 포함 137건)">ON</button>
+          </div>
+        </div>
 
       <!-- 1~6번 카테고리 세로 내비게이션 -->
 
@@ -958,11 +1128,14 @@
       <button id="mobileShareBtn" type="button" class="p-1.5 rounded-lg text-sky-700 hover:bg-sky-50 transition cursor-pointer" title="공유 주소">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"></path></svg>
       </button>
+      <button id="mobileLogoutBtn" type="button" class="p-1.5 rounded-lg text-zinc-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer" title="로그아웃">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+      </button>
     </div>
   </header>
 
   <!-- 우측 메인 콘텐츠 영역 -->
-  <main class="flex-1 min-w-0 p-3 sm:p-6 lg:p-8 overflow-y-auto max-w-full">
+  <main class="flex-1 min-w-0 p-3 sm:p-6 lg:p-8 lg:ml-64 overflow-y-auto max-w-full">
 
 
 
@@ -1262,7 +1435,7 @@
 
 
 
-        <span class="text-xs text-zinc-400">전화 · 채팅 · 게시판 막대 + 전체 건수 선</span>
+        <span class="text-xs text-zinc-400">전화(실통화) · 채팅 · 게시판 막대 + 전체 건수 선 (부재/ARS는 CTI 상세 탭에서 별도 제공)</span>
 
 
 
@@ -2362,10 +2535,17 @@
 
 
 
-        <span class="text-xs text-zinc-400">사진 클릭 시 원본 고화질 확대 · X:\9. 클레임 사진\2026 연동</span>
-
-
-
+        <div class="flex items-center gap-2">
+          <span class="inline-flex items-center gap-1 rounded bg-teal-50/80 border border-teal-200/80 px-2 py-0.5 text-[11px] font-semibold text-teal-800">
+            <span class="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse"></span>
+            구글 드라이브 & 사내 폴더 자동 연동
+          </span>
+          <button id="btnSyncGdrivePhotos" type="button" onclick="triggerGdrivePhotoSync()" class="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-medium text-zinc-600 hover:bg-zinc-50 transition cursor-pointer" title="지금 즉시 강제 새로고침 (평소에는 자동 반영)">
+            <svg class="h-3 w-3 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+            새로고침
+          </button>
+          <span class="text-xs text-zinc-400">사진 클릭 시 확대</span>
+        </div>
       </div>
 
 
@@ -2482,11 +2662,8 @@
 
 
 
-              <th class="py-2 px-4 font-medium">고객 불만 내용</th>
-
-
-
-              <th class="py-2 px-4 font-medium">조치 내역</th>
+              <th class="py-2 px-4 font-medium min-w-[280px]">고객 불만 내용</th>
+              <th class="py-2 px-4 font-medium min-w-[280px]">조치 내역</th>
 
 
 
@@ -3226,11 +3403,8 @@
 
 
 
-              <th class="py-2 px-4 font-medium">파손/불만 접수 원문</th>
-
-
-
-              <th class="py-2 px-4 font-medium">조치 결과</th>
+              <th class="py-2 px-4 font-medium min-w-[280px]">파손/불만 접수 원문</th>
+              <th class="py-2 px-4 font-medium min-w-[280px]">조치 결과</th>
 
 
 
@@ -3902,11 +4076,8 @@
 
 
 
-              <th class="py-2 px-4 font-medium">고객 불만 내용 원문</th>
-
-
-
-              <th class="py-2 px-4 font-medium">CS 조치 결과 및 개선점</th>
+              <th class="py-2 px-4 font-medium min-w-[280px]">고객 불만 내용 원문</th>
+              <th class="py-2 px-4 font-medium min-w-[280px]">CS 조치 결과 및 개선점</th>
 
 
 
@@ -4035,22 +4206,6 @@
 
 
           ⏱️ 클레임 분석 (리드타임/통화)
-
-
-
-        </button>
-
-
-
-        <button id="btnSubAlfDetail" type="button" style="display:none;" class="inline-flex items-center gap-1.5 rounded-lg bg-zinc-100 px-3.5 py-1.5 text-xs font-medium text-zinc-600 transition hover:bg-zinc-200 hover:text-zinc-900">
-
-
-
-          <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg>
-
-
-
-          🤖 AI 챗봇 분석
 
 
 
@@ -4870,10 +5025,26 @@
 
 
 
+      <!-- CTI 집계 기준 안내 및 부재 포함 토글 바 -->
+      <section class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white px-4 py-3 ring-1 ring-black/5 text-xs shadow-xs">
+        <div class="flex flex-wrap items-center gap-2.5 text-zinc-700">
+          <span class="inline-flex h-2 w-2 rounded-full bg-teal-500"></span>
+          <span class="font-bold text-zinc-900 tracking-tight">전화상담 분석 (CTI)</span>
+          <span class="hidden sm:inline-block text-zinc-300">|</span>
+          <span id="ctiStandardDescText" class="text-zinc-600 font-medium">순수 실통화 93건 (수신 56 · 발신 37)</span>
+          <span id="ctiIvrResolvedBadge" class="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2.5 py-0.5 text-[11px] font-bold text-indigo-700 ring-1 ring-indigo-500/20" title="고객이 전화 연결 전 IVR에서 알림톡 링크를 받아 챗봇(ALF)으로 전환되거나 자동안내로 완료된 성공적 자동화 건수">⚡ IVR/AI 자동해결: 18건</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-semibold text-zinc-600">부재 포함</span>
+          <div class="inline-flex items-center rounded-lg bg-zinc-100 p-0.5 ring-1 ring-black/5 text-xs" role="group" aria-label="CTI 부재 포함 선택">
+            <button id="btnSimpleModeOff" type="button" class="rounded-md px-3 py-1 font-bold transition cursor-pointer bg-white text-zinc-900 shadow-2xs" title="순수 실통화 93건 (기본값)">OFF</button>
+            <button id="btnSimpleModeOn" type="button" class="rounded-md px-3 py-1 font-bold transition cursor-pointer text-zinc-500 hover:text-zinc-800" title="채널톡 공식 전화 수 137건 (부재/미연결 포함)">ON</button>
+          </div>
+          <span id="ctiToggleStatusBadge" class="hidden sm:inline-flex rounded px-2 py-0.5 text-[11px] font-bold bg-zinc-100 text-zinc-600 ring-1 ring-black/5">93건</span>
+        </div>
+      </section>
+
       <!-- 1. CTI 핵심 4대 KPI Row -->
-
-
-
       <section id="ctiKpiRow" class="mt-4 grid grid-cols-2 gap-px overflow-visible relative z-20 rounded-xl bg-black/5 ring-1 ring-black/5 sm:grid-cols-4"></section>
 
 
@@ -5634,11 +5805,8 @@
 
 
 
-                <th class="py-2.5 px-4 font-medium">고객 문의 / 상담 통화 요약</th>
-
-
-
-                <th class="py-2.5 px-4 font-medium">CS 조치 결과</th>
+                <th class="py-2.5 px-4 font-medium min-w-[280px]">고객 문의 / 상담 통화 요약</th>
+                <th class="py-2.5 px-4 font-medium min-w-[280px]">CS 조치 결과</th>
 
 
 
@@ -5937,6 +6105,50 @@
 
 
 
+
+      <!-- 2.3 🤖 AI 챗봇(ALF) 문의 유형별 자체 완결 vs 상담사 이관 분석 -->
+      <section class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div class="rounded-xl bg-white p-4 ring-1 ring-black/5">
+          <div class="flex items-center justify-between">
+            <div>
+              <h2 class="text-sm font-semibold text-zinc-800 flex items-center gap-1.5">
+                <span>🤖</span>
+                <span>챗봇(ALF) 인입 문의 유형 Top 10 (자체완결 vs 상담사이관)</span>
+              </h2>
+              <p class="text-xs text-zinc-400 mt-0.5">상담사 연결 없이 자체 해결된 문의(청록) vs 상담사로 이관된 문의(주황)</p>
+            </div>
+            <span id="chatAlfTagTotalBadge" class="text-xs font-semibold text-teal-700 tnum"></span>
+          </div>
+          <div class="h-72 mt-3">
+            <canvas id="chatAlfTagChart"></canvas>
+          </div>
+        </div>
+
+        <div class="rounded-xl bg-white p-4 ring-1 ring-black/5">
+          <div class="flex items-center justify-between">
+            <div>
+              <h2 class="text-sm font-semibold text-zinc-800">챗봇 문의 유형별 완결 vs 이관 분석표</h2>
+              <p class="text-xs text-zinc-400 mt-0.5">태그별 인입량, 자체완결 건수, 상담원 이관 건수 및 셀프 완결율</p>
+            </div>
+            <span class="text-xs text-zinc-400">선택 기간 기준</span>
+          </div>
+          <div class="mt-3 overflow-x-auto max-h-72">
+            <table class="w-full text-left text-xs">
+              <thead class="bg-zinc-50 text-zinc-500 border-b border-black/5 sticky top-0">
+                <tr>
+                  <th class="py-2 px-2.5 font-medium">문의 유형</th>
+                  <th class="py-2 px-1.5 font-medium">여정</th>
+                  <th class="py-2 px-1.5 font-medium text-right">인입량</th>
+                  <th class="py-2 px-1.5 font-medium text-right text-teal-700">자체완결</th>
+                  <th class="py-2 px-1.5 font-medium text-right text-orange-600">이관</th>
+                  <th class="py-2 px-2 font-medium text-right">완결율</th>
+                </tr>
+              </thead>
+              <tbody id="chatAlfTagTableBody" class="divide-y divide-black/5 font-normal"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
 
       <!-- 2.5 [신규] 채팅 인입/발신 문의 유형(태그)별 증감 분석 섹션 -->
 
@@ -6242,11 +6454,8 @@
 
 
 
-                <th class="py-2.5 px-4 font-medium">고객 문의 / 불만 원문</th>
-
-
-
-                <th class="py-2.5 px-4 font-medium">CS 조치 결과</th>
+                <th class="py-2.5 px-4 font-medium min-w-[280px]">고객 문의 / 불만 원문</th>
+                <th class="py-2.5 px-4 font-medium min-w-[280px]">CS 조치 결과</th>
 
 
 
@@ -6275,14 +6484,9 @@
 
 
     </div> <!-- End chatCounselorViewWrapper -->
+  </div> <!-- End chatDetailSection -->
 
-
-
-
-
-
-
-    <!-- B. AI 상담(ALF) 심층 분석 뷰 (신규 3단 토글 연동) -->
+  <!-- B. AI 상담(ALF) 심층 분석 뷰 (신규 3단 토글 연동) -->
 
 
 
@@ -6599,10 +6803,6 @@
 
 
     </div> <!-- End alfDetailSection -->
-
-
-
-  </div> <!-- End chatDetailSection -->
 
 
 
@@ -8083,7 +8283,7 @@
 
 
 
-          <h2 id="reportTitle" class="mt-1 text-lg font-semibold tracking-tight"></h2>
+          <h2 id="reportTitle" class="mt-1 text-lg font-semibold tracking-tight whitespace-nowrap"></h2>
 
 
 
@@ -8111,22 +8311,15 @@
 
 
 
-          <button id="reportPrint" type="button" class="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-zinc-700 ring-1 ring-black/10 hover:bg-zinc-50 transition" title="브라우저 인쇄 대화상자 호출 (PDF 저장 가능)">
-
-
-
-            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
-
-
-
-            <span>PDF / 인쇄</span>
-
-
-
+          <button id="reportExportPdf" type="button" class="inline-flex items-center gap-1.5 rounded-md bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-rose-700 transition" title="현재 보이는 리포트 화면을 단 1페이지 PDF 파일(.pdf)로 즉시 다운로드 추출">
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+            <span>리포트 PDF 추출 (PDF)</span>
           </button>
 
-
-
+          <button id="reportPrint" type="button" class="inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium text-zinc-600 ring-1 ring-black/10 hover:bg-zinc-50 transition" title="브라우저 인쇄 대화상자 호출 ('PDF로 저장' 선택 시 화면과 100% 동일한 고화질 벡터 PDF 저장 가능)">
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+            <span>인쇄 / 벡터 PDF</span>
+          </button>
         </div>
 
 
@@ -8187,58 +8380,17 @@
 
 
 
-      <!-- 2.5 AI 상담(ALF 챗봇) 처리율 코멘트 인사이트 배너 (슬림 핵심 요약) -->
-
-
-
-      <section id="reportAiAlfInsightSection" class="mt-4 rounded-xl bg-gradient-to-r from-teal-50/70 via-indigo-50/40 to-sky-50/50 p-2.5 px-3.5 ring-1 ring-indigo-200/50 shadow-2xs">
-
-
-
-        <div class="flex flex-wrap items-center justify-between gap-2.5">
-
-
-
-          <div class="flex items-center gap-2 text-xs">
-
-
-
+      <!-- 2.5 AI 상담(ALF 챗봇) 응대 현황 (KPI 카드 그리드) -->
+      <section id="reportAiAlfInsightSection" class="mt-6">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-2 shrink-0">
             <span class="text-base shrink-0">🤖</span>
-
-
-
-            <span class="font-bold text-indigo-950">AI 챗봇(ALF) 처리율</span>
-
-
-
-            <span id="reportAlfTagRateBadge" class="rounded-full bg-teal-100 px-2 py-0.5 text-[11px] font-extrabold text-teal-800 ring-1 ring-teal-200"></span>
-
-
-
-            <span id="reportAlfInsightComment" class="text-zinc-600 font-medium ml-1"></span>
-
-
-
+            <h3 class="text-sm font-semibold text-zinc-700 whitespace-nowrap">2.5 AI 챗봇(ALF) 응대 현황</h3>
+            <span class="text-xs text-zinc-400 whitespace-nowrap">인바운드 채팅 세션 기준 (상담사 연결 및 자체 완결 분석)</span>
           </div>
-
-
-
-          <div id="reportAlfMetricsLine" class="flex items-center gap-2 text-xs bg-white/90 backdrop-blur-xs px-3 py-1 rounded-lg ring-1 ring-black/5 font-medium shadow-2xs">
-
-
-
-            <!-- 선택기간 / 직전기간 / 증감 동적 주입 -->
-
-
-
-          </div>
-
-
-
+          <div id="reportAlfExtraBadge" class="text-xs text-zinc-500 font-medium whitespace-nowrap"></div>
         </div>
-
-
-
+        <div id="reportAlfKpiGrid" class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4"></div>
       </section>
 
 
@@ -8248,10 +8400,7 @@
 
 
       <!-- 3. 부문별 클레임 현황 & 이슈 인사이트 (품질 · 배송 · 서비스 3대 부문 통합) -->
-
-
-
-      <section class="mt-6">
+      <section id="reportThreePillarsSection" class="mt-6">
 
 
 
@@ -8259,11 +8408,11 @@
 
 
 
-          <h3 class="text-sm font-semibold text-zinc-800">3. 부문별 클레임 현황 &amp; 이슈 인사이트 <span class="text-xs font-normal text-zinc-400">(품질 · 배송 · 서비스 3개 부문)</span></h3>
+          <h3 class="text-sm font-semibold text-zinc-800 whitespace-nowrap">3. 부문별 클레임 현황 &amp; 이슈 인사이트 <span class="text-xs font-normal text-zinc-400 whitespace-nowrap">(품질 · 배송 · 서비스 3개 부문)</span></h3>
 
 
 
-          <span class="text-xs text-zinc-400">부문별 발생량 · 증감 추이 · 주요 유형 TOP 5 · 이슈 코멘트</span>
+          <span class="text-xs text-zinc-400 whitespace-nowrap">부문별 발생량 · 증감 추이 · 주요 유형 TOP 5 · 이슈 코멘트</span>
 
 
 
@@ -8275,7 +8424,7 @@
 
 
 
-        <div id="reportThreePillars" class="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4"></div>
+        <div id="reportThreePillars" class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4"></div>
 
 
 
@@ -8368,10 +8517,7 @@
 
 
           <!-- ON / OFF 스위치 -->
-
-
-
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 print:hidden is-print-hidden">
 
 
 
@@ -8419,22 +8565,10 @@
 
 
 
-      <!-- 5. CX팀 종합 코멘트 -->
-
-
-
-      <section class="mt-6">
-
-
-
+      <!-- 5. CX팀 종합 코멘트 (작성된 코멘트 있을 때만 노출) -->
+      <section id="reportMemoSection" class="mt-6">
         <h3 id="reportMemoHeading" class="text-sm font-semibold text-zinc-700">5. CX팀 종합 코멘트</h3>
-
-
-
         <div id="reportMemo" class="mt-3 space-y-2"></div>
-
-
-
       </section>
 
 
@@ -8443,7 +8577,7 @@
 
 
 
-      <p class="mt-8 border-t border-black/10 pt-4 text-center text-xs text-zinc-400 hidden print:block">베베숲 CX팀 주간 VOC 분석 시스템 · 채널톡 / 게시판 / 배송 DB 실시간 연동</p>
+      <p class="mt-2.5 border-t border-black/10 pt-1.5 text-center text-[10px] text-zinc-400 hidden print:block">베베숲 CX팀 주간 VOC 분석 리포트</p>
 
 
 
@@ -8705,115 +8839,37 @@
 
         <div class="mt-4 space-y-3.5 text-xs">
 
-
-
-          <!-- 1. 사내 와이파이 / 사내망 -->
-
-
-
-          <div class="p-3 bg-zinc-50 rounded-xl border border-zinc-200/80">
-
-
-
+          <!-- 1. 공식 영구 고정 주소 (외부/모바일 상시 접속) -->
+          <div class="p-3.5 bg-gradient-to-br from-emerald-50 to-teal-50/60 rounded-xl border border-emerald-200 shadow-xs">
             <div class="flex items-center justify-between mb-1.5">
-
-
-
-              <span class="font-semibold text-zinc-800 flex items-center gap-1.5">
-
-
-
-                <span class="w-2 h-2 rounded-full bg-emerald-500"></span> 1. 사내 와이파이 / 유선랜
-
-
-
+              <span class="font-bold text-emerald-950 flex items-center gap-1.5">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-emerald-300"></span> ⭐ 공식 영구 고정 주소 (외부/모바일 상시 접속)
               </span>
-
-
-
-              <span class="text-[10px] text-zinc-500 font-medium">사내 네트워크 전용</span>
-
-
-
+              <span class="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded">영구 고정</span>
             </div>
-
-
-
-            <div class="flex items-center gap-2 mt-2">
-
-
-
-              <input type="text" id="shareNetworkInput" readonly class="w-full bg-white px-2.5 py-1.5 border border-zinc-200 rounded-lg text-zinc-800 font-mono text-[11px] select-all outline-none" value="http://192.168.0.24:8080">
-
-
-
-              <button type="button" id="copyNetworkBtn" class="shrink-0 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg font-medium transition cursor-pointer text-xs">복사</button>
-
-
-
-            </div>
-
-
-
-          </div>
-
-
-
-          <!-- 2. 외부 / 다른 와이파이 / 모바일 -->
-
-
-
-          <div class="p-3 bg-sky-50/70 rounded-xl border border-sky-100">
-
-
-
-            <div class="flex items-center justify-between mb-1.5">
-
-
-
-              <span class="font-semibold text-sky-900 flex items-center gap-1.5">
-
-
-
-                <span class="w-2 h-2 rounded-full bg-sky-500 animate-pulse"></span> 2. 외부 / 다른 와이파이 / 모바일
-
-
-
-              </span>
-
-
-
-              <span class="text-[10px] text-sky-600 font-semibold">보안 터널 (TryCloudflare)</span>
-
-
-
-            </div>
-
-
-
             <div class="flex items-center gap-1.5 mt-2">
-              <input type="text" id="shareTunnelInput" readonly class="w-full bg-white px-2.5 py-1.5 border border-sky-200 rounded-lg text-sky-950 font-mono text-[11px] select-all outline-none cursor-pointer" value="조회 중..." title="클릭 시 전체 선택">
-              <button type="button" id="copyTunnelBtn" class="shrink-0 px-2.5 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg font-medium transition cursor-pointer text-xs">복사</button>
-              <a id="openTunnelLink" href="#" target="_blank" rel="noopener noreferrer" class="shrink-0 px-2 py-1.5 bg-sky-100 hover:bg-sky-200 text-sky-800 rounded-lg font-medium transition cursor-pointer text-xs inline-flex items-center gap-0.5">새창열기 ↗</a>
+              <input type="text" id="shareDdnsInput" readonly class="w-full bg-white px-2.5 py-1.5 border border-emerald-300 rounded-lg text-emerald-950 font-mono text-[11px] font-bold select-all outline-none cursor-pointer" value="http://bebesup-voc.synology.me:8080" title="클릭 시 전체 선택">
+              <button type="button" id="copyDdnsBtn" class="shrink-0 px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg font-bold transition cursor-pointer text-xs">복사</button>
+              <a id="openDdnsLink" href="http://bebesup-voc.synology.me:8080" target="_blank" rel="noopener noreferrer" class="shrink-0 px-2 py-1.5 bg-white border border-emerald-300 hover:bg-emerald-50 text-emerald-800 rounded-lg font-bold transition cursor-pointer text-xs inline-flex items-center gap-0.5">새창열기 ↗</a>
             </div>
-
-
-
-            <p class="text-[10.5px] text-sky-700 mt-2 leading-relaxed">
-
-
-
-              💡 외부 주소는 VPN이나 포트포워딩 없이 외부 미팅, 재택, 스마트폰에서도 바로 대시보드와 리포트 추출 기능을 이용할 수 있습니다.
-
-
-
+            <p class="text-[10.5px] text-emerald-800 mt-2 leading-relaxed font-medium">
+              ✨ 시놀로지 NAS 기반 24시간 365일 무중단 공식 외부 고정 주소입니다.
             </p>
-
-
-
           </div>
 
-
+          <!-- 2. 사내 와이파이 / 유선랜 -->
+          <div class="p-3 bg-zinc-50 rounded-xl border border-zinc-200/80">
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="font-semibold text-zinc-800 flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-blue-500"></span> 2. 사내 와이파이 / 유선랜
+              </span>
+              <span class="text-[10px] text-zinc-500 font-medium">사내 네트워크 전용</span>
+            </div>
+            <div class="flex items-center gap-2 mt-2">
+              <input type="text" id="shareNetworkInput" readonly class="w-full bg-white px-2.5 py-1.5 border border-zinc-200 rounded-lg text-zinc-800 font-mono text-[11px] select-all outline-none" value="http://192.168.0.12:8080">
+              <button type="button" id="copyNetworkBtn" class="shrink-0 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg font-medium transition cursor-pointer text-xs">복사</button>
+            </div>
+          </div>
 
         </div>
 
@@ -8840,15 +8896,30 @@
     <!-- 사내 보안 감사 로그 모달 (관리자 전용) -->
     <div id="auditLogModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs transition-opacity duration-200 hidden">
       <div class="w-full max-w-4xl max-h-[85vh] rounded-2xl bg-white p-5 shadow-2xl ring-1 ring-black/10 mx-4 border border-zinc-100 flex flex-col">
-        <div class="flex items-center justify-between pb-3.5 border-b border-zinc-100 shrink-0">
-          <div class="flex items-center gap-2">
-            <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 text-indigo-700 text-sm font-bold">📋</span>
+        <!-- 모달 헤더 바 -->
+        <div class="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-zinc-100 shrink-0">
+          <div class="flex items-center gap-2.5">
+            <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-50 text-indigo-700 text-base font-bold shadow-2xs">📋</span>
             <div>
-              <h3 class="text-sm font-bold text-zinc-900">사내 대시보드 보안 감사 로그 (Audit Trail)</h3>
+              <div class="flex items-center gap-2">
+                <h3 class="text-sm font-bold text-zinc-900">사내 보안 감사 로그 (Audit Trail)</h3>
+                <span id="auditActiveFilterTag" class="hidden px-2 py-0.5 rounded-full text-[10.5px] font-semibold bg-indigo-100 text-indigo-800 border border-indigo-200"></span>
+              </div>
               <p class="text-[11px] text-zinc-400">누가 언제 접속하고 데이터를 다운로드했는지 실시간 기록됩니다</p>
             </div>
           </div>
+
           <div class="flex items-center gap-2">
+            <!-- 뷰 전환 탭: 목록 vs 달력 히트맵 -->
+            <div class="inline-flex rounded-lg bg-zinc-100 p-0.5 text-xs font-semibold ring-1 ring-zinc-200/50">
+              <button id="auditViewTabList" type="button" class="px-3 py-1 rounded-md transition cursor-pointer bg-white text-indigo-700 shadow-2xs font-bold">
+                📋 목록 뷰
+              </button>
+              <button id="auditViewTabCalendar" type="button" class="px-3 py-1 rounded-md transition cursor-pointer text-zinc-600 hover:text-zinc-900">
+                📅 달력 히트맵 뷰
+              </button>
+            </div>
+
             <button id="btnSyncEmployeesModal" type="button" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-semibold ring-1 ring-emerald-200 transition cursor-pointer" title="구글 시트 임직원 명부 즉시 재동기화">
               <span>📥 임직원 명부 동기화</span>
             </button>
@@ -8859,33 +8930,138 @@
           </div>
         </div>
 
-        <!-- 로그 검색 / 필터 -->
-        <div class="mt-3 flex items-center justify-between gap-3 shrink-0">
-          <input type="text" id="auditSearchInput" placeholder="이름, 이메일, 활동 내용 또는 IP 검색..." class="w-full sm:w-80 rounded-lg border border-zinc-200 bg-zinc-50/70 px-3 py-1.5 text-xs text-zinc-800 outline-none focus:border-indigo-600 focus:bg-white focus:ring-1 focus:ring-indigo-600/20">
-          <span id="auditLogCountBadge" class="text-xs text-zinc-400 shrink-0">총 0건 기록</span>
+        <!-- 일별 활동량 스파이크 바 (Spike Activity Strip) -->
+        <div class="mt-2.5 px-3 py-2 bg-gradient-to-r from-slate-50 via-indigo-50/30 to-white rounded-xl border border-zinc-200/70 flex items-center justify-between gap-2.5 shrink-0">
+          <div class="flex items-center gap-1.5 text-xs font-bold text-zinc-700 shrink-0">
+            <span>📊 일별 활동량:</span>
+          </div>
+          <div id="auditDailySpikeStrip" class="flex items-center gap-1.5 overflow-x-auto py-0.5 max-w-full text-xs select-none">
+            <!-- JS 동적 생성: 활동 일자별 뱃지/막대 -->
+          </div>
         </div>
 
-        <!-- 로그 테이블 -->
-        <div class="mt-3 flex-1 overflow-y-auto overflow-x-auto min-h-0 border border-zinc-200/80 rounded-xl">
-          <table class="w-full text-left text-xs">
-            <thead class="sticky top-0 bg-zinc-100 text-zinc-600 border-b border-zinc-200 text-[11px]">
-              <tr>
-                <th class="py-2 px-3 font-semibold">일시 (KST)</th>
-                <th class="py-2 px-3 font-semibold">사용자 / 부서</th>
-                <th class="py-2 px-3 font-semibold">구분</th>
-                <th class="py-2 px-3 font-semibold">상세 활동 내용</th>
-                <th class="py-2 px-3 font-semibold">접속 IP</th>
-              </tr>
-            </thead>
-            <tbody id="auditLogTableBody" class="divide-y divide-zinc-100 font-normal">
-              <tr><td colspan="5" class="py-8 text-center text-zinc-400">감사 로그를 불러오는 중입니다...</td></tr>
-            </tbody>
-          </table>
+        <!-- [VIEW 1] 목록 뷰 영역 -->
+        <div id="auditListViewContainer" class="flex-1 flex flex-col min-h-0">
+          <!-- 로그 검색 및 다차원 필터 바 -->
+          <div class="mt-2.5 flex flex-wrap items-center justify-between gap-2.5 shrink-0 bg-zinc-50/80 p-2.5 rounded-xl border border-zinc-200/70">
+            <div class="flex flex-wrap items-center gap-2 flex-1 min-w-[280px]">
+              <!-- 키워드 검색 -->
+              <div class="relative flex-1 min-w-[180px] max-w-xs">
+                <input type="text" id="auditSearchInput" placeholder="이름, 이메일, 활동, IP 검색..." class="w-full rounded-lg border border-zinc-200 bg-white px-3 py-1.5 pl-8 text-xs text-zinc-800 outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600/20">
+                <svg class="w-3.5 h-3.5 text-zinc-400 absolute left-2.5 top-2.5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+              </div>
+
+              <!-- 날짜 필터 선택 -->
+              <select id="auditDateFilterSelect" class="rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs text-zinc-700 outline-none focus:border-indigo-600 cursor-pointer shadow-2xs">
+                <option value="all">📅 전체 날짜</option>
+                <option value="today">오늘 (Today)</option>
+                <option value="yesterday">어제</option>
+                <option value="week">최근 7일</option>
+              </select>
+
+              <!-- 활동 구분 필터 -->
+              <select id="auditActionFilterSelect" class="rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs text-zinc-700 outline-none focus:border-indigo-600 cursor-pointer shadow-2xs">
+                <option value="all">전체 활동</option>
+                <option value="LOGIN">🔑 로그인</option>
+                <option value="LOGOUT">🚪 로그아웃</option>
+                <option value="EXCEL_DOWNLOAD">📥 엑셀다운</option>
+                <option value="FAST_SYNC">⚡ DB동기화</option>
+              </select>
+            </div>
+
+            <div class="flex items-center gap-2 shrink-0">
+              <!-- 페이지당 건수 -->
+              <div class="flex items-center gap-1 text-[11px] text-zinc-500">
+                <span>표시:</span>
+                <select id="auditPageSizeSelect" class="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700 outline-none focus:border-indigo-600 cursor-pointer shadow-2xs">
+                  <option value="20" selected>20건</option>
+                  <option value="30">30건</option>
+                  <option value="50">50건</option>
+                  <option value="100">100건</option>
+                  <option value="-1">전체보기</option>
+                </select>
+              </div>
+              <span id="auditLogCountBadge" class="text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-2.5 py-1 shrink-0">총 0건 기록</span>
+            </div>
+          </div>
+
+          <!-- 로그 테이블 (날짜별 그룹화 지원) -->
+          <div id="auditLogTableContainer" class="mt-2.5 flex-1 overflow-y-auto overflow-x-auto min-h-0 border border-zinc-200/80 rounded-xl bg-white shadow-2xs">
+            <table class="w-full text-left text-xs table-fixed">
+              <thead class="sticky top-0 bg-zinc-100/95 backdrop-blur-xs text-zinc-600 border-b border-zinc-200 text-[11px] z-20">
+                <tr>
+                  <th class="py-2.5 px-3 font-semibold w-24">시간</th>
+                  <th class="py-2.5 px-3 font-semibold w-48 sm:w-56">사용자 / 부서</th>
+                  <th class="py-2.5 px-3 font-semibold w-24 text-center">구분</th>
+                  <th class="py-2.5 px-3 font-semibold min-w-[200px]">상세 활동 내용</th>
+                  <th class="py-2.5 px-3 font-semibold w-28 text-right">접속 IP</th>
+                </tr>
+              </thead>
+              <tbody id="auditLogTableBody" class="divide-y divide-zinc-100 font-normal">
+                <tr><td colspan="5" class="py-8 text-center text-zinc-400">감사 로그를 불러오는 중입니다...</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- 하단 페이지네이션 및 닫기 바 -->
+          <div class="mt-2.5 pt-2.5 border-t border-zinc-100 flex flex-wrap items-center justify-between gap-2.5 shrink-0">
+            <div class="flex items-center gap-2">
+              <span id="auditPageRangeText" class="text-xs text-zinc-500 font-medium">1~20건 / 총 0건</span>
+            </div>
+
+            <!-- 페이지 버튼 목록 -->
+            <div id="auditPageBtnsContainer" class="flex items-center gap-1 select-none">
+              <!-- JS 동적 생성 -->
+            </div>
+
+            <div class="flex items-center gap-2.5">
+              <p class="text-[10.5px] text-zinc-400 hidden sm:inline">💡 실시간 보관: logs/audit_log.jsonl</p>
+              <button id="closeAuditLogModalBtn2" type="button" class="px-4 py-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 rounded-lg text-xs font-semibold cursor-pointer transition">닫기</button>
+            </div>
+          </div>
         </div>
 
-        <div class="mt-3 pt-2.5 border-t border-zinc-100 flex items-center justify-between shrink-0">
-          <p class="text-[10.5px] text-zinc-400">💡 감사 로그는 서버 영구 파일(logs/audit_log.jsonl)에 실시간 보관됩니다.</p>
-          <button id="closeAuditLogModalBtn2" type="button" class="px-4 py-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 rounded-lg text-xs font-semibold cursor-pointer">닫기</button>
+        <!-- [VIEW 2] 달력 히트맵 뷰 영역 -->
+        <div id="auditCalendarViewContainer" class="flex-1 flex flex-col min-h-0 hidden mt-2.5">
+          <!-- 캘린더 네비게이션 헤더 바 -->
+          <div class="flex flex-wrap items-center justify-between gap-2.5 pb-2.5 shrink-0 border-b border-zinc-100">
+            <div class="flex items-center gap-2">
+              <button id="auditCalPrevMonthBtn" type="button" class="px-2.5 py-1 rounded-lg border border-zinc-200 bg-white hover:bg-zinc-50 text-zinc-700 text-xs font-semibold cursor-pointer transition">◀ 이전 달</button>
+              <h4 id="auditCalCurrentMonthText" class="text-sm font-bold text-zinc-900 px-1">2026년 11월</h4>
+              <button id="auditCalNextMonthBtn" type="button" class="px-2.5 py-1 rounded-lg border border-zinc-200 bg-white hover:bg-zinc-50 text-zinc-700 text-xs font-semibold cursor-pointer transition">다음 달 ▶</button>
+              <button id="auditCalTodayBtn" type="button" class="px-2 py-1 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-xs font-bold cursor-pointer transition">오늘</button>
+            </div>
+
+            <div class="flex items-center gap-2.5 text-[11px] text-zinc-500">
+              <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded bg-zinc-100 border border-zinc-200"></span> 활동없음</span>
+              <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded bg-indigo-50 border border-indigo-200"></span> 1~5건</span>
+              <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded bg-indigo-100 border border-indigo-300"></span> 6~15건</span>
+              <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded bg-indigo-600"></span> 16건+ (스파이크)</span>
+            </div>
+          </div>
+
+          <!-- 달력 그리드 컨테이너 -->
+          <div class="flex-1 overflow-y-auto border border-zinc-200/90 rounded-xl bg-white p-2.5 shadow-2xs mt-2">
+            <!-- 요일 헤더 -->
+            <div class="grid grid-cols-7 gap-1.5 text-center font-bold text-xs pb-2 border-b border-zinc-100">
+              <div class="text-rose-500">일</div>
+              <div class="text-zinc-600">월</div>
+              <div class="text-zinc-600">화</div>
+              <div class="text-zinc-600">수</div>
+              <div class="text-zinc-600">목</div>
+              <div class="text-zinc-600">금</div>
+              <div class="text-sky-600">토</div>
+            </div>
+            <!-- 날짜 셀 그리드 -->
+            <div id="auditCalendarGrid" class="grid grid-cols-7 gap-1.5 pt-2">
+              <!-- JS 동적 생성 -->
+            </div>
+          </div>
+
+          <div class="mt-2.5 pt-2 border-t border-zinc-100 flex items-center justify-between text-xs text-zinc-500 shrink-0">
+            <span>💡 특정 날짜를 클릭하면 해당 일자의 세부 감사 로그 목록으로 즉시 이동합니다.</span>
+            <button id="closeAuditLogModalBtn3" type="button" class="px-4 py-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 rounded-lg text-xs font-semibold cursor-pointer transition">닫기</button>
+          </div>
         </div>
       </div>
     </div>
@@ -8938,7 +9114,7 @@
 
 
 
-    <p class="mt-6 text-center text-xs text-zinc-400">베베숲 CX팀 주간 VOC 분석 시스템 · 채널톡 / 게시판 / 배송 DB 실시간 연동</p>
+    <p class="mt-6 text-center text-xs text-zinc-400 print:hidden is-print-hidden">베베숲 CX팀 주간 VOC 분석 리포트</p>
 
 
 
@@ -8954,46 +9130,49 @@
 
 
 
-<script src="data.js?v=20261027_1635"></script>
-
-
-
-<script src="engine.js?v=20261027_1635"></script>
-
-
-
-<script src="render.js?v=20261103_0915"></script>
-
-
+<script src="data.js?v=20261113_1155"></script>
+<script src="engine.js?v=20261123_1630"></script>
+<script src="render.js?v=20261123_1630"></script>
 
 <script>
 
-
-
   function startApp() {
-
-
 
     const styleSel = document.createElement("style");
 
-
-
     styleSel.textContent = ".mode-btn[aria-pressed=true]{background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.06)}";
-
-
 
     document.head.appendChild(styleSel);
 
-
-
     if (window.VOC_RENDER && typeof window.VOC_RENDER.init === "function") {
-
-
-
       window.VOC_RENDER.init();
 
+      try {
+        var urlParams = new URLSearchParams(window.location.search);
+        var reqWeek = urlParams.get("week") || sessionStorage.getItem("voc_current_week") || localStorage.getItem("voc_current_week") || sessionStorage.getItem("voc_current_period_key") || localStorage.getItem("voc_current_period_key");
+        var reqView = urlParams.get("view") || sessionStorage.getItem("voc_current_view") || localStorage.getItem("voc_current_view");
+        var reqMode = urlParams.get("mode") || sessionStorage.getItem("voc_current_mode") || localStorage.getItem("voc_current_mode");
 
+        if (window.VOC_ENGINE && window.VOC_ENGINE.state) {
+          if (reqMode && ["weekly", "monthly", "quarterly", "yearly"].includes(reqMode)) {
+            window.VOC_ENGINE.state.mode = reqMode;
+          }
+          if (reqWeek && window.VOC_DATA && Array.isArray(window.VOC_DATA.WEEKS)) {
+            var wIdx = window.VOC_DATA.WEEKS.findIndex(function(w) { return w.key === reqWeek; });
+            if (wIdx !== -1) {
+              window.VOC_ENGINE.state.periodIndex = wIdx;
+            }
+          }
+        }
 
+        if (reqView && typeof window.VOC_RENDER.switchView === "function") {
+          window.VOC_RENDER.switchView(reqView);
+        }
+        if (urlParams.get("print") === "true") {
+          window.__PRINT_READY__ = true;
+          document.body.setAttribute("data-rendered", "true");
+        }
+      } catch(e) {}
     } else {
 
 

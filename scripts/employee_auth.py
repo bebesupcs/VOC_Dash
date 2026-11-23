@@ -354,12 +354,15 @@ def authenticate(username: str, password: str, project_root: Path):
     # 기존 아이디/비번 직접 검증 지원 (호환성 유지)
     return verify_otp(username, password, project_root)
 
-def record_audit_log(entry: dict, project_root: Path):
-    project_root = Path(project_root)
-    logs_dir = project_root / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    audit_file = logs_dir / "audit_log.jsonl"
+def get_audit_file_candidates(project_root: Path):
+    return [
+        Path("/data/logs/audit_log.jsonl"),
+        Path(r"X:\logs\audit_log.jsonl"),
+        Path(project_root) / "logs" / "audit_log.jsonl"
+    ]
 
+
+def record_audit_log(entry: dict, project_root: Path):
     record = {
         "timestamp": get_kst_now(),
         "action": entry.get("action", "UNKNOWN"),
@@ -373,30 +376,40 @@ def record_audit_log(entry: dict, project_root: Path):
         "user_agent": entry.get("user_agent", "")
     }
 
-    try:
-        with open(audit_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
-        sys.stderr.write(f"[AUDIT] {record['timestamp']} | {record['username']} ({record['name']} / {record['dept']}) | {record['action']} | {record['target']} | IP: {record['ip']}\n")
-    except Exception as e:
-        sys.stderr.write(f"[AUDIT_ERROR] 감사 로그 기록 실패: {e}\n")
+    line_str = json.dumps(record, ensure_ascii=False) + "\n"
 
-    return record
-
-def get_recent_audit_logs(project_root: Path, limit=200):
-    project_root = Path(project_root)
-    audit_file = project_root / "logs" / "audit_log.jsonl"
-    logs = []
-    if audit_file.exists():
+    # 로컬 컨테이너 및 NAS 지속 스토리지에 동시 영구 저장
+    for p in get_audit_file_candidates(project_root):
         try:
-            with open(audit_file, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        try:
-                            logs.append(json.loads(line))
-                        except Exception:
-                            pass
+            p.parent.mkdir(parents=True, exist_ok=True)
+            with open(p, "a", encoding="utf-8") as f:
+                f.write(line_str)
         except Exception:
             pass
-    logs.reverse()
+
+    sys.stderr.write(f"[AUDIT] {record['timestamp']} | {record['username']} ({record['name']} / {record['dept']}) | {record['action']} | {record['target']} | IP: {record['ip']}\n")
+    return record
+
+
+def get_recent_audit_logs(project_root: Path, limit=200):
+    logs = []
+    seen = set()
+    for p in get_audit_file_candidates(project_root):
+        if p.exists():
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            try:
+                                item = json.loads(line)
+                                key = (item.get("timestamp"), item.get("action"), item.get("username"), item.get("target"))
+                                if key not in seen:
+                                    seen.add(key)
+                                    logs.append(item)
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+    logs.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
     return logs[:limit]

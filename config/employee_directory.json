@@ -4,314 +4,454 @@
       "username": "jwpark@bebesup.co.kr",
       "id": "jwpark",
       "name": "박진우 대표",
+      "raw_name": "박진우",
+      "title": "대표",
       "dept": "경영진",
       "phone": "02-562-8183",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "jhhwang@bebesup.co.kr",
       "id": "jhhwang",
       "name": "황준하 총괄이사",
+      "raw_name": "황준하",
+      "title": "총괄이사",
       "dept": "경영진",
       "phone": "02-562-8620",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "mkt@bebesup.co.kr",
       "id": "mkt",
       "name": "이승철 본부장",
+      "raw_name": "이승철",
+      "title": "본부장",
       "dept": "경영진",
       "phone": "02-562-8186",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "jhlee@bebesup.co.kr",
       "id": "jhlee",
       "name": "이주훈 실장",
+      "raw_name": "이주훈",
+      "title": "실장",
       "dept": "경영진 / 사업기획실",
       "phone": "02-6325-8727",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "jwc@bebesup.co.kr",
       "id": "jwc",
       "name": "최진원 실장",
+      "raw_name": "최진원",
+      "title": "실장",
       "dept": "경영진 / Product Innovation (PI팀)",
       "phone": "02-562-8617",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "ehkim@bebesup.co.kr",
       "id": "ehkim",
       "name": "김은혜 과장",
+      "raw_name": "김은혜",
+      "title": "과장",
       "dept": "Product Innovation (PI팀)",
       "phone": "02-6325-8729",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "jwshin@bebesup.co.kr",
       "id": "jwshin",
       "name": "신지우 과장",
+      "raw_name": "신지우",
+      "title": "과장",
       "dept": "Product Innovation (PI팀)",
       "phone": "02-562-8618",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "jikim@bebesup.co.kr",
       "id": "jikim",
       "name": "김지인 주임",
+      "raw_name": "김지인",
+      "title": "주임",
       "dept": "Product Innovation (PI팀)",
       "phone": "02-6325-8738",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "ytkim@bebesup.co.kr",
       "id": "ytkim",
       "name": "김용태 팀장",
+      "raw_name": "김용태",
+      "title": "팀장",
       "dept": "경영관리팀",
       "phone": "02-562-8187",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "yschoi@bebesup.co.kr",
       "id": "yschoi",
       "name": "최연서 과장",
+      "raw_name": "최연서",
+      "title": "과장",
       "dept": "경영관리팀",
       "phone": "02-569-8720",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "khkim@bebesup.co.kr",
       "id": "khkim",
       "name": "김관호 대리",
+      "raw_name": "김관호",
+      "title": "대리",
       "dept": "경영관리팀",
       "phone": "02-569-8722",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "hiyou@bebesup.co.kr",
       "id": "hiyou",
       "name": "유혜인 주임",
+      "raw_name": "유혜인",
+      "title": "주임",
       "dept": "경영관리팀",
       "phone": "02-569-8721",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "hlee@bebesup.co.kr",
       "id": "hlee",
       "name": "이훈 팀장",
+      "raw_name": "이훈",
+      "title": "팀장",
       "dept": "이커머스 1팀",
       "phone": "02-6325-8312",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "rjkim@bebesup.co.kr",
       "id": "rjkim",
       "name": "김례정 대리",
+      "raw_name": "김례정",
+      "title": "대리",
       "dept": "이커머스 1팀",
       "phone": "02-6325-8725",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "sklee@bebesup.co.kr",
       "id": "sklee",
       "name": "이선경 대리",
+      "raw_name": "이선경",
+      "title": "대리",
       "dept": "이커머스 1팀",
       "phone": "02-6325-8734",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "jykim@bebesup.co.kr",
       "id": "jykim",
       "name": "김주연 대리",
+      "raw_name": "김주연",
+      "title": "대리",
       "dept": "이커머스 1팀",
       "phone": "02-562-8625",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "khk@bebesup.co.kr",
       "id": "khk",
       "name": "김광한 팀장",
+      "raw_name": "김광한",
+      "title": "팀장",
       "dept": "이커머스 2팀",
       "phone": "02-6325-8300",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "ejhyun@bebesup.co.kr",
       "id": "ejhyun",
       "name": "현은지 주임",
+      "raw_name": "현은지",
+      "title": "주임",
       "dept": "이커머스 2팀",
       "phone": "02-562-8619",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "jbp@bebesup.co.kr",
       "id": "jbp",
       "name": "박준범 팀장",
+      "raw_name": "박준범",
+      "title": "팀장",
       "dept": "SCM팀",
       "phone": "02-562-8185",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "syma@bebesup.co.kr",
       "id": "syma",
       "name": "마상연 주임",
+      "raw_name": "마상연",
+      "title": "주임",
       "dept": "SCM팀",
       "phone": "02-565-3096",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "sbeom@bebesup.co.kr",
       "id": "sbeom",
       "name": "엄세빈 사원",
+      "raw_name": "엄세빈",
+      "title": "사원",
       "dept": "SCM팀",
       "phone": "02-6325-8728",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "ehkwon@bebesup.co.kr",
       "id": "ehkwon",
       "name": "권은형 사원",
+      "raw_name": "권은형",
+      "title": "사원",
       "dept": "SCM팀",
       "phone": "02-6325-8733",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "hshwang@bebesup.co.kr",
       "id": "hshwang",
       "name": "황현수 팀장",
+      "raw_name": "황현수",
+      "title": "팀장",
       "dept": "CX팀",
       "phone": "02-6325-8313",
-      "role": "admin"
+      "role": "admin",
+      "source": "google_sheet"
     },
     {
       "username": "jhpark@bebesup.co.kr",
       "id": "jhpark",
       "name": "박주희 대리",
+      "raw_name": "박주희",
+      "title": "대리",
       "dept": "CX팀",
       "phone": "02-6325-8308",
-      "role": "admin"
+      "role": "admin",
+      "source": "google_sheet"
     },
     {
       "username": "sboh@bebesup.co.kr",
       "id": "sboh",
       "name": "오세빈 사원",
+      "raw_name": "오세빈",
+      "title": "사원",
       "dept": "CX팀",
       "phone": "02-562-8621",
-      "role": "admin"
+      "role": "admin",
+      "source": "google_sheet"
     },
     {
       "username": "yshan@bebesup.co.kr",
       "id": "yshan",
       "name": "한윤서 사원",
+      "raw_name": "한윤서",
+      "title": "사원",
       "dept": "CX팀",
       "phone": "02-6325-8307",
-      "role": "admin"
+      "role": "admin",
+      "source": "google_sheet"
     },
     {
       "username": "hrkim@bebesup.co.kr",
       "id": "hrkim",
       "name": "김하랑 사원",
+      "raw_name": "김하랑",
+      "title": "사원",
       "dept": "CX팀",
       "phone": "02-6325-8743",
-      "role": "admin"
+      "role": "admin",
+      "source": "google_sheet"
     },
     {
       "username": "hwham@bebesup.co.kr",
       "id": "hwham",
       "name": "함형욱 팀장",
+      "raw_name": "함형욱",
+      "title": "팀장",
       "dept": "마케팅팀",
       "phone": "02-562-8622",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "bebesup@bebesup.co.kr",
       "id": "bebesup",
       "name": "윤은주 과장",
+      "raw_name": "윤은주",
+      "title": "과장",
       "dept": "마케팅팀",
       "phone": "02-562-8623",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "mjkang@bebesup.co.kr",
       "id": "mjkang",
       "name": "강미정 대리",
+      "raw_name": "강미정",
+      "title": "대리",
       "dept": "마케팅팀",
       "phone": "02-562-8017",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "hyeonjchoi@bebesup.co.kr",
       "id": "hyeonjchoi",
       "name": "최현정 대리",
+      "raw_name": "최현정",
+      "title": "대리",
       "dept": "마케팅팀",
       "phone": "02-553-7005",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "hrback@bebesup.co.kr",
       "id": "hrback",
       "name": "백해린 대리",
+      "raw_name": "백해린",
+      "title": "대리",
       "dept": "마케팅팀",
       "phone": "02-562-8018",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "shl@bebesup.co.kr",
       "id": "shl",
       "name": "이소희 주임",
+      "raw_name": "이소희",
+      "title": "주임",
       "dept": "마케팅팀",
       "phone": "02-569-8723",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "jyj@bebesup.co.kr",
       "id": "jyj",
       "name": "조지연 팀장",
+      "raw_name": "조지연",
+      "title": "팀장",
       "dept": "디자인팀",
       "phone": "02-6325-8730",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "yjl@bebesup.co.kr",
       "id": "yjl",
       "name": "이여진 과장",
+      "raw_name": "이여진",
+      "title": "과장",
       "dept": "디자인팀",
       "phone": "02-6325-8731",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "shlee@bebesup.co.kr",
       "id": "shlee",
       "name": "이소현 대리",
+      "raw_name": "이소현",
+      "title": "대리",
       "dept": "디자인팀",
       "phone": "02-6325-8740",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "kmham@bebesup.co.kr",
       "id": "kmham",
       "name": "함경민 대리",
+      "raw_name": "함경민",
+      "title": "대리",
       "dept": "디자인팀",
       "phone": "02-569-8737",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "yjk@bebesup.co.kr",
       "id": "yjk",
       "name": "김영재 주임",
+      "raw_name": "김영재",
+      "title": "주임",
       "dept": "디자인팀",
       "phone": "02-6325-8742",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
     },
     {
       "username": "dsjeong@bebesup.co.kr",
       "id": "dsjeong",
       "name": "정다솜 사원",
+      "raw_name": "정다솜",
+      "title": "사원",
       "dept": "디자인팀",
       "phone": "02-569-8719",
-      "role": "user"
+      "role": "user",
+      "source": "google_sheet"
+    },
+    {
+      "username": "jsryu@ajcc.co.kr",
+      "id": "jsryu",
+      "name": "류제승 차장",
+      "raw_name": "류제승",
+      "title": "차장",
+      "dept": "AJ",
+      "phone": "",
+      "role": "user",
+      "source": "google_sheet"
+    },
+    {
+      "username": "jcyoon@ajcc.co.kr",
+      "id": "jcyoon",
+      "name": "윤재철 과장",
+      "raw_name": "윤재철",
+      "title": "과장",
+      "dept": "AJ",
+      "phone": "",
+      "role": "user",
+      "source": "google_sheet"
     }
   ],
-  "last_synced": "2026-11-02 12:10:00"
+  "last_synced": "2026-11-19 11:14:01",
+  "total_count": 41
 }

@@ -1,18 +1,17 @@
+version: '3.8'
+
 services:
-  voc_dashboard:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: voc_dashboard:latest
-    container_name: voc_dashboard
-    restart: unless-stopped
+  web:
+    image: voc-dashboard:latest
+    build: .
+    container_name: voc-dashboard
+    restart: always
     ports:
       - "8080:8080"
-    volumes:
-      - ./dashboard:/app/dashboard
-      - ./scripts:/app/scripts
-      - ./config:/app/config
-      - ./logs:/app/logs
     environment:
       - PORT=8080
       - PYTHONUNBUFFERED=1
+      - TZ=Asia/Seoul
+    volumes:
+      - "/volume1/DATA/11. VOC, CCM 자료 등/1. VOC 불만접수현황:/data"
+      - "/volume1/DATA/9. 클레임 사진:/app/claim_photos"

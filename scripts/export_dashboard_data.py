@@ -24,8 +24,13 @@ if sys.stdout.encoding != 'utf-8':
     except Exception:
         pass
 
-NAS_DB_PATH = "/volume1/data/11. VOC, CCM 자료 등/1. VOC 불만접수현황/db/channeltalk_voc.db"
-DEFAULT_DB_PATH = NAS_DB_PATH if os.path.exists(NAS_DB_PATH) else r"X:\11. VOC, CCM 자료 등\1. VOC 불만접수현황\db\channeltalk_voc.db"
+CANDIDATE_DBS = [
+    "/data/db/channeltalk_voc.db",
+    "/volume1/data/11. VOC, CCM 자료 등/1. VOC 불만접수현황/db/channeltalk_voc.db",
+    "/volume1/DATA/11. VOC, CCM 자료 등/1. VOC 불만접수현황/db/channeltalk_voc.db",
+    r"X:\11. VOC, CCM 자료 등\1. VOC 불만접수현황\db\channeltalk_voc.db"
+]
+DEFAULT_DB_PATH = next((p for p in CANDIDATE_DBS if os.path.exists(p)), CANDIDATE_DBS[-1])
 FALLBACK_DB_PATH = r"C:\Users\hshwa\OneDrive\문서\VOC점검\channeltalk_voc_claim_test.db"
 DEFAULT_OUT_DIR = Path(__file__).resolve().parent.parent / "dashboard"
 
@@ -265,6 +270,66 @@ def extract_dashboard_data(db_path, out_dir):
 
     print(f"✓ 게시판 수기접수 주차별/판매처별 집계 완료 ({len(board_by_week)}개 주차)")
 
+    # 3-2. 게시판(Board) 달력 기준 월간 / 분기 / 연간 집계 (1일~말일 달력 기준 100% 일치)
+    cur.execute("""
+        SELECT substr(date, 1, 7) as m_key, SUM(board_count) as total
+        FROM board_daily_counts
+        WHERE mall_name NOT IN ('전체합계', '합계') AND mall_name NOT LIKE '%합계%' AND date >= '2025-01-01'
+        GROUP BY substr(date, 1, 7)
+    """)
+    board_by_month = {r["m_key"]: int(r["total"]) for r in cur.fetchall()}
+
+    board_by_quarter = {}
+    for m_key, total in board_by_month.items():
+        if "-" in m_key:
+            y, m = m_key.split("-")
+            q_key = f"{y}-Q{(int(m) - 1) // 3 + 1}"
+            board_by_quarter[q_key] = board_by_quarter.get(q_key, 0) + total
+
+    board_by_year = {}
+    for m_key, total in board_by_month.items():
+        if "-" in m_key:
+            y, _ = m_key.split("-")
+            board_by_year[y] = board_by_year.get(y, 0) + total
+
+    cur.execute("""
+        SELECT substr(date, 1, 7) as m_key, mall_name, SUM(board_count) as total
+        FROM board_daily_counts
+        WHERE mall_name NOT IN ('전체합계', '합계') AND mall_name NOT LIKE '%합계%'
+          AND mall_name IS NOT NULL AND mall_name != '' AND date >= '2025-01-01'
+        GROUP BY substr(date, 1, 7), mall_name
+        HAVING total > 0
+        ORDER BY total DESC
+    """)
+    board_malls_by_month = {}
+    for r in cur.fetchall():
+        m_key = r["m_key"]
+        m_name = (r["mall_name"] or "").strip()
+        if m_key not in board_malls_by_month:
+            board_malls_by_month[m_key] = {}
+        board_malls_by_month[m_key][m_name] = int(r["total"])
+
+    board_malls_by_quarter = {}
+    for m_key, malls in board_malls_by_month.items():
+        if "-" in m_key:
+            y, m = m_key.split("-")
+            q_key = f"{y}-Q{(int(m) - 1) // 3 + 1}"
+            if q_key not in board_malls_by_quarter:
+                board_malls_by_quarter[q_key] = {}
+            for m_name, cnt in malls.items():
+                board_malls_by_quarter[q_key][m_name] = board_malls_by_quarter[q_key].get(m_name, 0) + cnt
+
+    board_malls_by_year = {}
+    for m_key, malls in board_malls_by_month.items():
+        if "-" in m_key:
+            y, _ = m_key.split("-")
+            if y not in board_malls_by_year:
+                board_malls_by_year[y] = {}
+            for m_name, cnt in malls.items():
+                board_malls_by_year[y][m_name] = board_malls_by_year[y].get(m_name, 0) + cnt
+
+    print(f"✓ 게시판 달력 기준 월간/분기/연간 집계 완료 (10월: {board_by_month.get('2026-10', 0):,}건)")
+
     # 4. 배송 클레임(Shipment Claims - 초저온/풀필먼트) 주차별 수집
     cur.execute("""
         SELECT
@@ -287,6 +352,9 @@ def extract_dashboard_data(db_path, out_dir):
         w_key = matching_w["key"]
         v_type = "초저온" if r["vendor_type"] == "coldchain" else "풀필먼트"
         c_type = r["claim_type"] or "기타"
+        c_clean = c_type.replace(" ", "")
+        if c_clean in ["저단가반송", "저단가", "운임비불만", "운임비", "운임불만"]:
+            c_type = "운임비 불만"
         risk = "HIGH" if any(h in c_type for h in ["벌레", "이물질", "파손"]) else "LOW"
 
         raw_prod = (r["product_name"] or "").strip()
@@ -346,7 +414,9 @@ def extract_dashboard_data(db_path, out_dir):
             "claimDate": c_date,
             "orderDate": o_date,
             "cust": (r["customer_name"] or "").strip()[:10],
-            "prod": clean_prod if clean_prod else "배송 전반",
+            "prod": raw_prod if raw_prod else (clean_prod if clean_prod else "배송 전반"),
+            "raw_prod": raw_prod if raw_prod else (clean_prod if clean_prod else "배송 전반"),
+            "clean_prod": clean_prod if clean_prod else "배송 전반",
             "orderNo": (r["order_no"] or "").strip(),
             "invoice": (r["original_invoice_no"] or "").strip(),
             "text": (r["claim_text"] or "").strip()[:150],
@@ -371,7 +441,8 @@ def extract_dashboard_data(db_path, out_dir):
             f.mall_name, f.manufacture_date,
             f.special_note, f.quality_send_yn, f.handle_type, f.ai_status,
             f.managedAt, f.manager_name,
-            f.customer_name, f.name
+            f.customer_name, f.name,
+            f.order_no, f.shipment_type, f.invoice_no
         FROM fact_voc f
         LEFT JOIN tag_master tm ON f.full_tag = tm.full_tag
         WHERE f.year IN (2025, 2026)
@@ -595,7 +666,10 @@ def extract_dashboard_data(db_path, out_dir):
             "custName": cust_name,
             "name": cust_name,
             "date": date_str,
-            "time": managed_at
+            "time": managed_at,
+            "orderNo": (r["order_no"] or "").strip(),
+            "shipmentType": (r["shipment_type"] or "").strip(),
+            "invoice": (r["invoice_no"] or "").strip()
         }
         chats_by_week[w_key].append(chat_obj)
 
@@ -675,7 +749,9 @@ def extract_dashboard_data(db_path, out_dir):
         st = r["started_at"] or ""
         et = r["ended_at"] or ""
         eg = r["engaged_at"] or ""
-        ans = 1 if r["is_answered"] == 1 else 0
+        # 실제 통화 연결 여부 (engaged_at이 기록된 경우만 상담사 실통화 성공!)
+        has_engaged = bool(eg and str(eg).strip() != "")
+        ans = 1 if has_engaged else 0
 
         talk_sec = 0
         wait_sec = 0
@@ -1035,27 +1111,19 @@ def extract_dashboard_data(db_path, out_dir):
             "음성 사서함", "고객이 먼저 끊었을 때"
         }
         if w_cti:
-            def is_valid_inbound_call(c):
-                if c.get("dir") not in ("inbound", "missed"):
-                    return False
-                if c.get("ans") == 1:
-                    return True
-                reason = (c.get("reason") or "").strip()
-                if reason in cti_target_reasons:
-                    return True
-                if reason == "대기열에서 고객 종료" and c.get("is_in_hours"):
-                    return True
-                return False
-
-            calls_in = sum(1 for c in w_cti if is_valid_inbound_call(c))
-            # 아웃바운드: 부재(미연결) 제외하고 실통화건만 체크 (사용자 원칙)
+            # 제안 2번: 실제로 통화를 나눈 실통화 건수만 메인 카운트 (수신 실통화 + 발신 실통화)
+            calls_in = sum(1 for c in w_cti if c.get("dir") in ("inbound", "missed") and c.get("ans") == 1)
             calls_out = sum(1 for c in w_cti if c.get("dir") == "outbound" and c.get("ans") == 1 and "부재" not in (c.get("tag") or "") and "부재" not in (c.get("reason") or ""))
             calls_total = calls_in + calls_out
+            op_missed = sum(1 for c in w_cti if c.get("dir") in ("inbound", "missed") and c.get("ans") != 1 and c.get("is_in_hours"))
+            off_missed = sum(1 for c in w_cti if c.get("dir") in ("inbound", "missed") and c.get("ans") != 1 and not c.get("is_in_hours"))
         else:
             calls_in = sum(1 for c in w_chats if c.get("channel") == "전화" and c.get("direction") == "INBOUND" and c.get("valid"))
             # 아웃바운드: 부재 제외하고 실통화건만 체크
             calls_out = sum(1 for c in w_chats if c.get("channel") == "전화" and c.get("direction") == "OUTBOUND" and c.get("valid") and "부재" not in (c.get("sub") or "") and "부재" not in (c.get("tag") or ""))
             calls_total = calls_in + calls_out
+            op_missed = 0
+            off_missed = 0
 
         # 채널톡 온라인 채팅 (순수 채팅 전체 모수 220건, 배송접수 제외)
         chat_in = sum(1 for c in w_chats if c.get("channel") in ["채팅", "상담사챗", "챗봇(ALF)"] and c.get("channel") != "배송접수" and c.get("direction") != "OUTBOUND")
@@ -1072,16 +1140,35 @@ def extract_dashboard_data(db_path, out_dir):
             "raw_call": calls_total,
             "raw_call_inbound": calls_in,
             "raw_call_outbound": calls_out,
+            "raw_call_op_missed": op_missed,
+            "raw_call_off_missed": off_missed,
             "raw_chat": chats_all,
             "raw_chat_inbound": chat_in,
             "raw_chat_outbound": chat_out
         }
 
         # 2. CX팀 공식 성과 지표 (operational_kpis)
-        # 운영시간 내 인입 모수: 평일 09~17시 인바운드 콜 + 운영시간 내 유효 채팅(인&아웃)
+        # 운영시간 내 인입 모수: 평일 10~17시 인바운드 실질 응대대상 콜 + 운영시간 내 유효 채팅(인&아웃)
         if w_cti:
-            in_hours_calls = sum(1 for c in w_cti if c.get("dir") == "inbound" and c.get("is_in_hours"))
-            in_hours_calls_ans = sum(1 for c in w_cti if c.get("dir") == "inbound" and c.get("is_in_hours") and c.get("ans") == 1)
+            cti_target_reasons = {
+                "응대 가능 상담원 없음", "상담원 수신 거절", "대기열 최대 대기시간 초과",
+                "링 울리는 시간 초과", "최대 대기열 수 초과", "링 울리는 중 고객 종료",
+                "부재 중(ARS/IVR 이후)", "상담원 부재"
+            }
+            def is_cti_target(c):
+                if c.get("dir") not in ("inbound", "missed"):
+                    return False
+                if c.get("ans") == 1:
+                    return True
+                r = (c.get("reason") or "").strip()
+                if r in cti_target_reasons:
+                    return True
+                if r == "대기열에서 고객 종료" and c.get("is_in_hours"):
+                    return True
+                return False
+
+            in_hours_calls = sum(1 for c in w_cti if is_cti_target(c))
+            in_hours_calls_ans = sum(1 for c in w_cti if c.get("dir") in ("inbound", "missed") and c.get("ans") == 1)
         else:
             in_hours_calls = sum(1 for c in w_chats if c.get("channel") == "전화" and c.get("direction") == "INBOUND" and c.get("is_in_hours") and c.get("valid"))
             in_hours_calls_ans = in_hours_calls
@@ -1148,6 +1235,12 @@ def extract_dashboard_data(db_path, out_dir):
         "YEARS": years,
         "BOARD_COUNT_BY_WEEK": board_by_week,
         "BOARD_MALLS_BY_WEEK": board_malls_by_week,
+        "BOARD_COUNT_BY_MONTH": board_by_month,
+        "BOARD_COUNT_BY_QUARTER": board_by_quarter,
+        "BOARD_COUNT_BY_YEAR": board_by_year,
+        "BOARD_MALLS_BY_MONTH": board_malls_by_month,
+        "BOARD_MALLS_BY_QUARTER": board_malls_by_quarter,
+        "BOARD_MALLS_BY_YEAR": board_malls_by_year,
         "CHATS_BY_WEEK": chats_by_week,
         "ISSUES_BY_WEEK": issues_by_week,
         "SHIPMENTS_BY_WEEK": shipments_by_week,
