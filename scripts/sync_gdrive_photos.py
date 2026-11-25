@@ -6,6 +6,7 @@
 
 import os
 import sys
+import re
 from pathlib import Path
 
 if hasattr(sys.stdout, "reconfigure"):
