@@ -1503,7 +1503,21 @@ function renderReportChannelChart(recent, curPeriod) {
             ctx.textBaseline = "middle";
             const textWidth = ctx.measureText(str).width;
             const x = element.x;
-            const y = element.y - 12;
+            let y = element.y - 14;
+            // 같은 주차의 막대 상단 숫자 텍스트와 총합 배지가 겹치지 않도록 자동 상향 보정
+            let minBarY = Infinity;
+            for (let bi = 0; bi < chart.data.datasets.length; bi++) {
+              if (bi === datasetIndex) continue;
+              const bMeta = chart.getDatasetMeta(bi);
+              if (bMeta && bMeta.visible && bMeta.data[index]) {
+                const by = bMeta.data[index].y;
+                if (typeof by === "number" && by < minBarY) minBarY = by;
+              }
+            }
+            if (isFinite(minBarY) && (y + 9) > (minBarY - 13)) {
+              y = minBarY - 23;
+            }
+            if (y < 12) y = 12;
 
             ctx.fillStyle = isCur ? "#0f766e" : "rgba(24, 24, 27, 0.9)";
             const padX = isCur ? 6 : 4, padY = 2;
@@ -1776,6 +1790,7 @@ function renderMiniClaimChart(canvasId, labels, data, themeColor, activeColor, c
         padding: { top: 16, left: 2, right: 2, bottom: 0 }
       },
       plugins: {
+        datalabels: { display: false },
         legend: { display: false },
         tooltip: {
           callbacks: {
@@ -1958,10 +1973,10 @@ function renderReportThreePillars(period, prev, buckets, pb, recent) {
       }
 
       return `<tr class="hover:bg-zinc-50/60 transition">
-        <td class="py-2 px-1.5 font-medium text-zinc-900 min-w-0 align-middle">
-          <div class="flex items-center gap-1.5 min-w-0">
+        <td class="py-2 pl-1.5 pr-1 font-medium text-zinc-900 min-w-0 overflow-hidden align-middle">
+          <div class="flex items-center gap-1 min-w-0">
             <span class="inline-flex items-center justify-center w-4 h-4 rounded text-[10px] font-bold ${idx < 3 ? 'bg-zinc-100 text-zinc-700' : 'text-zinc-400'} shrink-0">${idx + 1}</span>
-            <span class="text-xs font-semibold text-zinc-800 whitespace-nowrap" title="${it.label}">${it.label}</span>
+            <span class="text-[11px] font-semibold text-zinc-800 truncate block min-w-0 flex-1" title="${it.label}">${it.label}</span>
           </div>
         </td>
         <td class="py-2 px-1 text-right font-bold text-zinc-800 tnum align-middle whitespace-nowrap text-xs">${Number(it.count).toLocaleString()}건</td>
@@ -2036,9 +2051,9 @@ function renderReportThreePillars(period, prev, buckets, pb, recent) {
           <div class="rounded-lg bg-white ring-1 ring-black/5 overflow-hidden">
             <table class="w-full text-left text-xs table-fixed">
               <colgroup>
-                <col style="width: 40%;">
-                <col style="width: 13%;">
-                <col style="width: 32%;">
+                <col style="width: 44%;">
+                <col style="width: 14%;">
+                <col style="width: 27%;">
                 <col style="width: 15%;">
               </colgroup>
               <thead class="bg-zinc-50/80 text-zinc-500 border-b border-black/5">
@@ -2536,11 +2551,12 @@ async function exportReportPdf() {
   const safePeriod = periodDisp.replace(/[\s\(\)\/\:\-]/g, "_");
   const downloadFileName = `[베베숲]_VOC_분석_종합리포트_${safePeriod}.pdf`;
 
-  // 1. 서버 네이티브 렌더링(Edge/Chromium 엔진)을 통해 화면과 100% 동일한 완벽한 1페이지 벡터 PDF 다운로드 우선 시도!
+  // 1. 서버 네이티브 렌더링(Chromium/Edge 엔진)을 통해 화면과 100% 동일한 순수 1페이지 벡터 PDF 다운로드 우선 시도!
   try {
     const url = `/api/export_report_pdf?period=${encodeURIComponent(period.key)}&mode=${encodeURIComponent(E.state.mode)}&riskEnabled=${reportRiskSectionEnabled ? 1 : 0}`;
     const res = await fetch(url);
-    if (res.ok) {
+    const ctype = (res.headers.get("content-type") || "").toLowerCase();
+    if (res.ok && ctype.includes("application/pdf")) {
       const blob = await res.blob();
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -2554,7 +2570,7 @@ async function exportReportPdf() {
       }, 1500);
 
       if (typeof showToast === "function") {
-        showToast("화면과 100% 동일한 고화질 1페이지 벡터 PDF가 성공적으로 다운로드되었습니다.");
+        showToast("웹 화면과 100% 동일한 1페이지 순수 벡터 PDF가 다운로드되었습니다.");
       }
       if (btn) {
         btn.innerHTML = origBtnHtml;
@@ -2563,7 +2579,7 @@ async function exportReportPdf() {
       return;
     }
   } catch (srvErr) {
-    console.warn("서버 네이티브 PDF 생성 실패, 클라이언트 렌더링으로 전환:", srvErr);
+    console.warn("서버 네이티브 벡터 PDF 생성 실패, 브라우저 네이티브 캡처로 전환:", srvErr);
   }
 
   const hiddenElements = [];
@@ -2572,136 +2588,157 @@ async function exportReportPdf() {
     const reportArticle = document.querySelector("#reportView article");
     if (!reportArticle) throw new Error("리포트 요소를 찾을 수 없습니다.");
 
+    const hideEl = (el) => {
+      if (!el || el.style.display === "none") return;
+      hiddenElements.push({ el, origDisplay: el.style.display });
+      el.style.display = "none";
+    };
+
     // 1. 리스크 섹션이 OFF인 경우 리포트 PDF에서 완전 미노출
     if (!reportRiskSectionEnabled) {
-      const riskSec = document.getElementById("reportRiskSection");
-      if (riskSec && riskSec.style.display !== "none") {
-        hiddenElements.push({ el: riskSec, origDisplay: riskSec.style.display });
-        riskSec.style.display = "none";
-      }
+      hideEl(document.getElementById("reportRiskSection"));
     }
 
     // 2. CX팀 종합 코멘트가 없는 경우 리포트 PDF에서 완전 미노출
     const memos = loadMemos();
     const memoList = (period && period.key && Array.isArray(memos[period.key])) ? memos[period.key] : [];
     if (!memoList || memoList.length === 0) {
-      const memoSec = document.getElementById("reportMemoSection");
-      if (memoSec && memoSec.style.display !== "none") {
-        hiddenElements.push({ el: memoSec, origDisplay: memoSec.style.display });
-        memoSec.style.display = "none";
-      }
+      hideEl(document.getElementById("reportMemoSection"));
     }
 
-    // 3. PDF 캡처 시 숨길 UI 요소들 (버튼들, 코멘트 추가폼 등)
+    // 3. PDF 캡처 시 숨길 UI 요소들 (상단 액션 버튼 그룹 및 개별 버튼, 코멘트 추가폼 등)
     const hideSelectors = [
+      "#reportActionButtons",
       "#reportExportExcel",
       "#reportExportPdf",
       "#reportPrint",
+      ".is-print-hidden",
       ".pillar-comment-form",
       ".delete-comment-btn",
       ".add-comment-btn",
       ".group\\/tip"
     ];
     hideSelectors.forEach((sel) => {
-      reportArticle.querySelectorAll(sel).forEach((el) => {
-        if (el.style.display !== "none") {
-          hiddenElements.push({ el, origDisplay: el.style.display });
-          el.style.display = "none";
-        }
-      });
+      reportArticle.querySelectorAll(sel).forEach(hideEl);
     });
-
-    if (typeof html2canvas !== "function") {
-      throw new Error("html2canvas 라이브러리가 로드되지 않았습니다. 페이지를 새로고침(F5) 해주세요.");
-    }
 
     // 화면 최상단 스크롤 이동 및 레이아웃 안정화
     window.scrollTo(0, 0);
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     await new Promise((r) => setTimeout(r, 120));
 
-    // html2canvas로 고화질(scale: 2) 무손실 캡처
-    // onclone에서 뷰포트 너비를 1080px로 안정화하여 화면 그대로 글자 짤림/줄바꿈 없이 캡처
-    const canvas = await html2canvas(reportArticle, {
-      scale: 2,
-      useCORS: true,
-      allowTaint: true,
-      logging: false,
-      backgroundColor: "#ffffff",
-      scrollX: 0,
-      scrollY: 0,
-      windowWidth: 1440,
-      onclone: (clonedDoc) => {
-        const clonedArticle = clonedDoc.querySelector("#reportView article");
-        if (clonedArticle) {
-          clonedArticle.style.width = "1080px";
-          clonedArticle.style.maxWidth = "1080px";
-          clonedArticle.style.minWidth = "1080px";
-          clonedArticle.style.boxSizing = "border-box";
-          clonedArticle.style.wordBreak = "keep-all";
+    let imgData = null;
+    let actualWidthPx = reportArticle.offsetWidth || 1080;
+    let actualHeightPx = reportArticle.offsetHeight || 1200;
 
-          const title = clonedArticle.querySelector("#reportTitle");
-          if (title) {
-            title.style.whiteSpace = "nowrap";
-            title.style.wordBreak = "keep-all";
+    // 2순위: 브라우저 네이티브 SVG foreignObject 렌더링(html-to-image) — 글자 내려앉음 0%, 화면 100% 일치
+    if (window.htmlToImage && typeof window.htmlToImage.toPng === "function") {
+      try {
+        const excludeIds = new Set(["reportActionButtons", "reportExportExcel", "reportExportPdf", "reportPrint"]);
+        const filterNode = (node) => {
+          if (!node || node.nodeType !== 1) return true;
+          if (excludeIds.has(node.id)) return false;
+          if (node.classList && (node.classList.contains("is-print-hidden") || node.classList.contains("pillar-comment-form") || node.classList.contains("delete-comment-btn") || node.classList.contains("add-comment-btn"))) {
+            return false;
           }
-        }
-
-        // html2canvas 전용 한글 폰트 및 뱃지 수직 중앙 정렬 보정 스타일 주입
-        // (1) Inter 영문 폰트와 한글 폰트 간 메트릭스 불일치로 인한 텍스트 처짐 및 받침 잘림 완벽 방지
-        // (2) 뱃지/박스 내부 텍스트가 아래로 쏠리지 않고 정중앙에 위치하도록 라인하이트와 패딩 보정
-        const style = clonedDoc.createElement("style");
-        style.innerHTML = `
-          #reportView article,
-          #reportView article * {
-            font-family: -apple-system, BlinkMacSystemFont, "Malgun Gothic", "맑은 고딕", "Pretendard", sans-serif !important;
-          }
-          #reportView article span[class*="text-[9.5px]"],
-          #reportView article span[class*="text-[10px]"],
-          #reportView article span[class*="text-xs"].rounded {
-            line-height: 1.2 !important;
-            padding-top: 1.5px !important;
-            padding-bottom: 2px !important;
-          }
-          #reportView article .inline-flex.items-center {
-            display: inline-flex !important;
-            align-items: center !important;
-          }
-        `;
-        clonedDoc.head.appendChild(style);
+          return true;
+        };
+        const rect = reportArticle.getBoundingClientRect();
+        actualWidthPx = Math.ceil(rect.width);
+        actualHeightPx = Math.ceil(rect.height);
+        imgData = await window.htmlToImage.toPng(reportArticle, {
+          pixelRatio: 2,
+          backgroundColor: "#ffffff",
+          skipFonts: true,
+          cacheBust: false,
+          filter: filterNode
+        });
+      } catch (htiErr) {
+        console.warn("html-to-image 캡처 실패, html2canvas로 폴백:", htiErr);
+        imgData = null;
       }
-    });
+    }
 
-    const imgData = canvas.toDataURL("image/png");
+    // 3순위: html2canvas 비상 폴백 (버튼 숨김 !important 강제 보장)
+    if (!imgData) {
+      if (typeof html2canvas !== "function") {
+        throw new Error("PDF 캡처 라이브러리가 로드되지 않았습니다. 페이지를 새로고침(F5) 해주세요.");
+      }
+      const canvas = await html2canvas(reportArticle, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        logging: false,
+        backgroundColor: "#ffffff",
+        scrollX: 0,
+        scrollY: 0,
+        windowWidth: 1440,
+        onclone: (clonedDoc) => {
+          const clonedArticle = clonedDoc.querySelector("#reportView article");
+          if (clonedArticle) {
+            clonedArticle.style.width = "1080px";
+            clonedArticle.style.maxWidth = "1080px";
+            clonedArticle.style.minWidth = "1080px";
+            clonedArticle.style.boxSizing = "border-box";
+            clonedArticle.style.wordBreak = "keep-all";
+
+            const title = clonedArticle.querySelector("#reportTitle");
+            if (title) {
+              title.style.whiteSpace = "nowrap";
+              title.style.wordBreak = "keep-all";
+            }
+          }
+
+          const style = clonedDoc.createElement("style");
+          style.innerHTML = `
+            #reportActionButtons,
+            #reportExportExcel,
+            #reportExportPdf,
+            #reportPrint,
+            .is-print-hidden,
+            .pillar-comment-form,
+            .delete-comment-btn,
+            .add-comment-btn,
+            .group\\/tip {
+              display: none !important;
+            }
+            #reportView article,
+            #reportView article * {
+              font-family: -apple-system, BlinkMacSystemFont, "Malgun Gothic", "맑은 고딕", "Pretendard", sans-serif !important;
+            }
+          `;
+          clonedDoc.head.appendChild(style);
+        }
+      });
+      imgData = canvas.toDataURL("image/png");
+      actualWidthPx = canvas.width / 2;
+      actualHeightPx = canvas.height / 2;
+    }
 
     const jsPdfLib = window.jspdf ? window.jspdf.jsPDF : (typeof jsPDF === "function" ? jsPDF : null);
     if (!jsPdfLib) {
       throw new Error("jsPDF 라이브러리가 로드되지 않았습니다. 페이지를 새로고침(F5) 해주세요.");
     }
 
-    // 캔버스 크기 기준 1:1 pt 매핑 (1 CSS px = 0.75 pt) 단 1페이지 PDF 생성
-    const actualWidthPx = canvas.width / 2;
-    const actualHeightPx = canvas.height / 2;
-    const ptWidth = actualWidthPx * 0.75;
-    const ptHeight = actualHeightPx * 0.75;
+    // 1:1 pt 매핑 (1 CSS px = 0.75 pt) + 은은한 흰색 테두리 여백(14pt) 단 1페이지 PDF 생성
+    const marginPt = 14;
+    const contentPtW = actualWidthPx * 0.75;
+    const contentPtH = actualHeightPx * 0.75;
+    const pagePtW = contentPtW + marginPt * 2;
+    const pagePtH = contentPtH + marginPt * 2;
 
     const pdf = new jsPdfLib({
-      orientation: ptWidth > ptHeight ? "landscape" : "portrait",
+      orientation: pagePtW > pagePtH ? "landscape" : "portrait",
       unit: "pt",
-      format: [ptWidth, ptHeight],
-      compress: false
+      format: [pagePtW, pagePtH],
+      compress: true
     });
 
-    pdf.addImage(imgData, "PNG", 0, 0, ptWidth, ptHeight);
-
-    const periodDisp = formatPeriodDisplayLabel(period, E.state.mode);
-    const safePeriod = periodDisp.replace(/[\s\(\)\/\:\-]/g, "_");
-    const downloadFileName = `[베베숲]_VOC_분석_종합리포트_${safePeriod}.pdf`;
-
+    pdf.addImage(imgData, "PNG", marginPt, marginPt, contentPtW, contentPtH);
     pdf.save(downloadFileName);
 
     if (typeof showToast === "function") {
-      showToast("리포트 1페이지 PDF가 성공적으로 다운로드되었습니다.");
+      showToast("화면과 동일한 고화질 1페이지 PDF가 다운로드되었습니다.");
     }
   } catch (err) {
     console.error("PDF 추출 실패:", err);

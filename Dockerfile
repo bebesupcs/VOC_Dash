@@ -3,10 +3,13 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# 기본 유틸 및 cloudflared (외부 접속 보안 터널) 설치
+# 기본 유틸, cloudflared, Chromium 및 한글 폰트(서버 네이티브 순수 벡터 PDF 렌더링용) 설치
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
+    chromium \
+    fonts-nanum \
+    fonts-noto-color-emoji \
     && curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared \
     && chmod +x /usr/local/bin/cloudflared \
     && rm -rf /var/lib/apt/lists/*

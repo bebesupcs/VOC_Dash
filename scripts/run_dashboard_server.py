@@ -387,18 +387,51 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             from urllib.parse import quote
 
             async def _gen():
+                import math
+                import shutil
                 async with async_playwright() as p:
-                    try:
-                        browser = await p.chromium.launch(channel="msedge")
-                    except Exception:
-                        browser = await p.chromium.launch()
+                    launch_args = ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+                    browser = None
+                    sys_chromium = shutil.which("chromium") or shutil.which("chromium-browser") or shutil.which("google-chrome")
+                    if os.name != "nt" and sys_chromium:
+                        browser = await p.chromium.launch(executable_path=sys_chromium, args=launch_args)
+                    else:
+                        try:
+                            browser = await p.chromium.launch(channel="msedge", args=launch_args)
+                        except Exception:
+                            if sys_chromium:
+                                browser = await p.chromium.launch(executable_path=sys_chromium, args=launch_args)
+                            else:
+                                browser = await p.chromium.launch(args=launch_args)
+
                     page = await browser.new_page(viewport={"width": 1440, "height": 900}, device_scale_factor=2)
+                    # @media print 재배치(줄바꿈/테두리 잘림)를 원천 차단하고 웹 화면 CSS 100% 그대로 유지!
+                    await page.emulate_media(media="screen")
                     url = f"http://127.0.0.1:{PORT}/index.html?print=true"
-                    await page.goto(url)
-                    await page.wait_for_timeout(1000)
+                    await page.goto(url, wait_until="networkidle")
+                    await page.wait_for_timeout(800)
                     t_period = target_period or ""
                     t_mode = target_mode or "weekly"
-                    await page.evaluate(f"""() => {{
+                    await page.evaluate(f"""async () => {{
+                        try {{
+                            const [catRes, memoRes] = await Promise.all([
+                                fetch('/api/cat_insights'),
+                                fetch('/api/memos')
+                            ]);
+                            if (catRes && catRes.ok) {{
+                                const catData = await catRes.json();
+                                if (catData && typeof catData === 'object') {{
+                                    localStorage.setItem('voc_cat_insights_v2', JSON.stringify(catData));
+                                }}
+                            }}
+                            if (memoRes && memoRes.ok) {{
+                                const memoData = await memoRes.json();
+                                if (memoData && typeof memoData === 'object') {{
+                                    localStorage.setItem('voc_memo_v1', JSON.stringify(memoData));
+                                }}
+                            }}
+                        }} catch (e) {{}}
+
                         const E = window.VOC_ENGINE || window.E;
                         const R = window.VOC_RENDER || {{}};
                         if (typeof switchView === 'function') switchView('report');
@@ -426,34 +459,87 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                         else if (R.renderReport) R.renderReport();
                         else if (window.renderReport) window.renderReport();
                     }}""")
-                    await page.wait_for_timeout(800)
-                    await page.evaluate("""() => {
-                        window.dispatchEvent(new Event('resize'));
-                        if (typeof Chart !== 'undefined') {
-                            for (let id in Chart.instances) {
-                                Chart.instances[id].resize();
-                            }
-                        }
-                    }""")
                     await page.wait_for_timeout(600)
+
+                    # PDF 추출 전용 정돈 CSS 주입: 버튼/사이드바/헤더/비활성 섹션만 숨기고 리포트 본문은 웹 화면 100% 그대로!
+                    await page.evaluate(f"""() => {{
+                        const riskOn = {'true' if risk_enabled else 'false'};
+                        if (!riskOn) {{
+                            const rSec = document.getElementById('reportRiskSection');
+                            if (rSec) rSec.style.display = 'none';
+                        }}
+                        const memoSec = document.getElementById('reportMemoSection');
+                        if (memoSec) {{
+                            const memoItems = memoSec.querySelectorAll('.memo-card, [data-memo-id], li');
+                            const hasText = memoSec.innerText && !memoSec.innerText.includes('등록된 코멘트가 없습니다');
+                            if (memoItems.length === 0 && !hasText) {{
+                                memoSec.style.display = 'none';
+                            }}
+                        }}
+                        const style = document.createElement('style');
+                        style.innerHTML = `
+                            aside, #appSidebar, header, #authLoginPage, #periodControls,
+                            #openSidebarBtn, #mobileActiveTabBadge, #toastContainer,
+                            #reportActionButtons, #reportExportExcel, #reportExportPdf, #reportPrint,
+                            .is-print-hidden, .pillar-comment-form, .delete-comment-btn, .add-comment-btn, .group\\\\/tip,
+                            #dashboardView, #qualityView, #deliveryView, #serviceView, #channelView, #compensationView,
+                            main > p.text-center {{
+                                display: none !important;
+                            }}
+                            html, body {{
+                                margin: 0 !important;
+                                padding: 0 !important;
+                                background: #ffffff !important;
+                                overflow: visible !important;
+                                height: auto !important;
+                            }}
+                            main {{
+                                margin: 0 !important;
+                                padding: 0 !important;
+                                max-width: none !important;
+                                width: 100% !important;
+                            }}
+                            #reportView {{
+                                display: block !important;
+                                margin: 0 !important;
+                                padding: 18px !important;
+                                background: #ffffff !important;
+                                width: fit-content !important;
+                            }}
+                            #reportView article {{
+                                width: 1120px !important;
+                                max-width: 1120px !important;
+                                min-width: 1120px !important;
+                                margin: 0 !important;
+                                box-shadow: none !important;
+                                border: none !important;
+                            }}
+                        `;
+                        document.head.appendChild(style);
+                        window.dispatchEvent(new Event('resize'));
+                        if (typeof Chart !== 'undefined') {{
+                            for (let id in Chart.instances) {{
+                                Chart.instances[id].resize();
+                            }}
+                        }}
+                    }}""")
+                    await page.wait_for_timeout(600)
+
                     article = await page.wait_for_selector("#reportView article")
-                    png_bytes = await article.screenshot(type="png")
+                    box = await article.bounding_box()
+                    pdf_w = math.ceil((box["width"] if box else 1120) + 36)
+                    pdf_h = math.ceil((box["height"] if box else 1300) + 36)
+
+                    # 100% 순수 벡터 PDF 생성 (화면 크기 1:1 매핑, 은은한 18px 여백, 단 1페이지!)
+                    pdf_bytes = await page.pdf(
+                        width=f"{pdf_w}px",
+                        height=f"{pdf_h}px",
+                        print_background=True,
+                        margin={"top": "0px", "right": "0px", "bottom": "0px", "left": "0px"},
+                        page_ranges="1"
+                    )
                     await browser.close()
-
-                    import io
-                    from PIL import Image
-
-                    img = Image.open(io.BytesIO(png_bytes))
-                    if img.mode in ("RGBA", "LA"):
-                        bg = Image.new("RGB", img.size, (255, 255, 255))
-                        bg.paste(img, mask=img.split()[3])
-                        img = bg
-                    else:
-                        img = img.convert("RGB")
-
-                    pdf_buffer = io.BytesIO()
-                    img.save(pdf_buffer, format="PDF", resolution=144.0)
-                    return pdf_buffer.getvalue()
+                    return pdf_bytes
 
             pdf_data = asyncio.run(_gen())
             safe_p = (target_period or "리포트").replace("/", "_").replace(":", "_").replace(" ", "_")
