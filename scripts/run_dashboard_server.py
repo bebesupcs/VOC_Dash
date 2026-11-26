@@ -83,11 +83,21 @@ def bg_sync_gdrive():
         if now - last_gdrive_sync_time < 120:  # 최소 2분 주기 쓰로틀링
             return
         last_gdrive_sync_time = now
+        # 1. 클레임 사진 구글 드라이브 백그라운드 동기화
         try:
             sys.path.append(str(Path(__file__).resolve().parent))
             import sync_gdrive_photos
             importlib.reload(sync_gdrive_photos)
             sync_gdrive_photos.sync_claim_photos_from_gdrive(quiet=True)
+        except Exception:
+            pass
+
+        # 2. 게시판 구글 시트 수기접수 & 통합 데이터 백그라운드 자동 갱신
+        try:
+            sys.path.append(str(Path(__file__).resolve().parent))
+            import fast_unified_sync
+            importlib.reload(fast_unified_sync)
+            fast_unified_sync.run_fast_patch(sync_api=False)
         except Exception:
             pass
 

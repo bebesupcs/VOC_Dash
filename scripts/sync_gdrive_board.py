@@ -55,7 +55,8 @@ def sync_board_from_google_sheet(log_func=print):
 
     # 1. 원본 디자인 템플릿 로드
     tpl_path = None
-    for cand in [TEMPLATE_FILE, BACKUP_BOARD_FILE, NAS_BOARD_FILE]:
+    container_tpl = PROJECT_ROOT / "templates" / "게시판_통합운영_template.xlsx"
+    for cand in [TEMPLATE_FILE, container_tpl, Path("/app/templates/게시판_통합운영_template.xlsx"), NAS_BOARD_FILE, CONTAINER_BOARD_FILE, BACKUP_BOARD_FILE]:
         if cand.exists() and cand.stat().st_size > 1024:
             tpl_path = cand
             break

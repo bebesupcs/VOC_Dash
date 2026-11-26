@@ -17,6 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY scripts /app/scripts
 COPY dashboard /app/dashboard
 COPY config /app/config
+COPY templates /app/templates
 
 EXPOSE 8080
 
